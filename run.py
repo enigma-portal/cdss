@@ -1,5 +1,6 @@
 from flask import Flask
 from app.database import initialize_database
+from config import PROJECT_TITLE
 
 app = Flask(__name__)
 
@@ -9,7 +10,7 @@ initialize_database()
 
 @app.route("/")
 def home():
-    return "Cyber Decision Support System is running!"
+    return f"{PROJECT_TITLE} is running!"
 
 
 if __name__ == "__main__":
