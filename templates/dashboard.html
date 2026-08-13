@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <section class="summary" aria-label="Incident summary">
+    <article><span>Total incidents</span><strong>{{ totals.total or 0 }}</strong></article>
+    <article class="critical"><span>Critical</span><strong>{{ totals.critical or 0 }}</strong></article>
+    <article class="high"><span>High</span><strong>{{ totals.high or 0 }}</strong></article>
+    <article><span>Open</span><strong>{{ totals.open or 0 }}</strong></article>
+  </section>
+
+  <section class="panel">
+    <div class="panel-heading">
+      <div>
+        <p class="eyebrow">LATEST DECISIONS</p>
+        <h2>Processed incidents</h2>
+      </div>
+      <p>{{ incidents|length }} shown</p>
+    </div>
+
+    {% if incidents %}
+      <div class="incident-list">
+      {% for incident in incidents %}
+        <article class="incident">
+          <div class="incident-main">
+            <div class="incident-title">
+              <span class="badge {{ incident.severity_label }}">{{ incident.severity_label }}</span>
+              <h3>{{ incident.title }}</h3>
+            </div>
+            <p class="metadata">
+              Incident #{{ incident.id }} · {{ incident.detected_at }}
+              {% if incident.agent_name %} · Agent: {{ incident.agent_name }}{% endif %}
+              {% if incident.source_ip %} · Source: {{ incident.source_ip }}{% endif %}
+              {% if incident.technique_id %} · {{ incident.technique_id }}{% endif %}
+            </p>
+          </div>
+          <div class="risk"><span>Risk score</span><strong>{{ "%.2f"|format(incident.final_risk_score or 0) }}/10</strong></div>
+          <div class="actions">
+            <h4>Recommended actions</h4>
+            {% if incident.recommendations %}
+              <ol>
+              {% for recommendation in incident.recommendations %}
+                <li>{{ recommendation.action_text }} <small>{{ recommendation.response_phase }}</small></li>
+              {% endfor %}
+              </ol>
+            {% else %}
+              <p>No curated action is available for this technique yet.</p>
+            {% endif %}
+          </div>
+        </article>
+      {% endfor %}
+      </div>
+    {% else %}
+      <div class="empty-state">
+        <h3>No incidents yet</h3>
+        <p>When Wazuh Indexer alerts are processed, their risk scores and response actions will appear here.</p>
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}
