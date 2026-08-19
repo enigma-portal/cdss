@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from app.services.alert_collector import collect_alerts
+from app.services.alert_collector import collect_alerts, collect_alerts_from_wazuh
 from app.services.alert_parser import parse_alert
 
 
@@ -24,6 +24,17 @@ SAMPLE_ALERT = {
 
 
 class AlertPipelineTests(unittest.TestCase):
+    def test_collects_from_read_only_indexer_client(self):
+        class Client:
+            def fetch_alerts(self, size, since):
+                self.arguments = (size, since)
+                return [SAMPLE_ALERT]
+
+        client = Client()
+        alerts = collect_alerts_from_wazuh(5, "2026-08-12T00:00:00Z", client)
+        self.assertEqual(alerts, [SAMPLE_ALERT])
+        self.assertEqual(client.arguments, (5, "2026-08-12T00:00:00Z"))
+
     def test_collect_and_parse_wazuh_alert(self):
         with tempfile.TemporaryDirectory() as directory:
             alerts_file = Path(directory) / "alerts.json"

@@ -22,6 +22,7 @@ def _dashboard_data():
         incidents = connection.execute("""
             SELECT incidents.id, incidents.title, incidents.status,
                    incidents.severity_label, incidents.detected_at,
+                   incidents.priority, incidents.decision_reason,
                    incidents.technique_id, alerts.agent_name,
                    alerts.source_ip, risk_scores.final_risk_score
             FROM incidents

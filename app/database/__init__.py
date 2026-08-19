@@ -174,6 +174,14 @@ def initialize_database():
             else:
                 _create_alerts_table(connection)
 
+            incident_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(incidents)")
+            }
+            if "priority" not in incident_columns:
+                connection.execute("ALTER TABLE incidents ADD COLUMN priority TEXT")
+            if "decision_reason" not in incident_columns:
+                connection.execute("ALTER TABLE incidents ADD COLUMN decision_reason TEXT")
+
             connection.executescript("""
                 CREATE INDEX IF NOT EXISTS idx_alerts_event_timestamp ON alerts(event_timestamp);
                 CREATE INDEX IF NOT EXISTS idx_alerts_mitre_id ON alerts(mitre_id);

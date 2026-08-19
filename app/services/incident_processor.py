@@ -3,7 +3,9 @@
 from datetime import datetime, timedelta, timezone
 
 from app.database import get_db_connection
-from app.risk_engine.scoring import calculate_risk, severity_for_risk
+from app.risk_engine.scoring import (
+    calculate_risk, explain_risk, priority_for_risk, severity_for_risk,
+)
 from app.services.alert_parser import parse_alert
 from app.services.recommendation_engine import get_recommendations
 from app.services.wazuh_indexer import WazuhIndexerClient
@@ -90,14 +92,19 @@ def process_alert(raw_alert):
 
             technique_risk = _base_technique_risk(connection, technique_id)
             risk = calculate_risk(parsed.rule_level, technique_risk, frequency_count)
+            severity = severity_for_risk(risk.final_risk_score)
+            priority = priority_for_risk(risk.final_risk_score)
+            explanation = explain_risk(risk)
             title = parsed.rule_description or f"Wazuh rule {parsed.rule_id} incident"
             incident_cursor = connection.execute("""
                 INSERT INTO incidents
-                    (alert_id, technique_id, title, severity_label, detected_at, summary)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (alert_id, technique_id, title, severity_label, priority,
+                     detected_at, summary, decision_reason)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                alert_id, technique_id, title, severity_for_risk(risk.final_risk_score),
+                alert_id, technique_id, title, severity, priority,
                 parsed.event_timestamp, "Created automatically from a Wazuh Indexer alert.",
+                explanation,
             ))
             incident_id = incident_cursor.lastrowid
             connection.execute("""
@@ -115,7 +122,9 @@ def process_alert(raw_alert):
                 "incident_id": incident_id,
                 "created": True,
                 "risk_score": risk.final_risk_score,
-                "severity": severity_for_risk(risk.final_risk_score),
+                "severity": severity,
+                "priority": priority,
+                "explanation": explanation,
                 "recommendations": [dict(row) for row in recommendations],
             }
     finally:

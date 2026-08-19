@@ -36,6 +36,8 @@ class IncidentProcessorTests(unittest.TestCase):
 
         self.assertTrue(result["created"])
         self.assertEqual(result["severity"], "high")
+        self.assertEqual(result["priority"], "P2")
+        self.assertIn("CDSS decision-support score", result["explanation"])
         self.assertEqual(len(result["recommendations"]), 2)
         self.assertFalse(duplicate["created"])
         self.assertEqual(duplicate["incident_id"], result["incident_id"])

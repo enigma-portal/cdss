@@ -50,3 +50,24 @@ def severity_for_risk(risk_score):
     if risk_score >= 3:
         return "medium"
     return "low"
+
+
+def priority_for_risk(risk_score):
+    """Translate the CDSS score into an analyst-friendly response priority."""
+    if risk_score >= 8:
+        return "P1"
+    if risk_score >= 6:
+        return "P2"
+    if risk_score >= 3:
+        return "P3"
+    return "P4"
+
+
+def explain_risk(risk):
+    """Explain the deterministic calculation without calling it a Wazuh score."""
+    return (
+        "CDSS decision-support score: "
+        f"40% Wazuh rule level ({risk.rule_level_score:.2f}/10), "
+        f"40% MITRE technique risk ({risk.technique_risk_score:.2f}/10), and "
+        f"20% one-hour recurrence ({risk.frequency_score:.2f}/10)."
+    )

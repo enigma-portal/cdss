@@ -3,6 +3,8 @@
 import json
 from pathlib import Path
 
+from app.services.wazuh_indexer import WazuhIndexerClient
+
 
 class AlertCollectionError(ValueError):
     """Raised when an alerts.json file cannot be read as JSON lines."""
@@ -37,3 +39,9 @@ def collect_alerts(alerts_file, limit=None):
             if limit is not None and len(alerts) >= limit:
                 break
     return alerts
+
+
+def collect_alerts_from_wazuh(size=100, since=None, client=None):
+    """Return a bounded, read-only batch directly from Wazuh Indexer."""
+    client = client or WazuhIndexerClient.from_environment()
+    return client.fetch_alerts(size=size, since=since)

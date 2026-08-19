@@ -24,6 +24,7 @@
           <div class="incident-main">
             <div class="incident-title">
               <span class="badge {{ incident.severity_label }}">{{ incident.severity_label }}</span>
+              {% if incident.priority %}<span class="priority">{{ incident.priority }}</span>{% endif %}
               <h3>{{ incident.title }}</h3>
             </div>
             <p class="metadata">
@@ -35,6 +36,7 @@
           </div>
           <div class="risk"><span>Risk score</span><strong>{{ "%.2f"|format(incident.final_risk_score or 0) }}/10</strong></div>
           <div class="actions">
+            {% if incident.decision_reason %}<p class="decision"><strong>Why:</strong> {{ incident.decision_reason }}</p>{% endif %}
             <h4>Recommended actions</h4>
             {% if incident.recommendations %}
               <ol>
