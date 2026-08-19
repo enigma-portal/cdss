@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<a class="back" href="{{ url_for('dashboard.index') }}">← Back to incidents</a>
+<a class="back" href="{{ url_for('dashboard.incidents') }}">← Back to incidents</a>
 <section class="detail-head">
   <div><p class="eyebrow">INCIDENT #{{ incident.id }}</p><h2>{{ incident.title }}</h2>
     <p class="metadata">Detected {{ incident.detected_at }} · Wazuh rule {{ incident.rule_id }}</p></div>
@@ -9,9 +9,9 @@
 
 <div class="detail-grid">
   <section class="panel detail-card"><h3>Decision factors</h3>
-    <p class="decision-summary">{{ incident.severity_label|title }} response priority based on detection strength, defensive context, and recurrence.</p>
-    <div class="score-factors"><div><strong>{{ incident.rule_level_score }}</strong><span>Rule · 40%</span></div><div><strong>{{ incident.technique_risk_score }}</strong><span>Context · 40%</span></div><div><strong>{{ incident.frequency_score }}</strong><span>Frequency · 20%</span></div></div>
-    <details><summary>Scoring methodology</summary><p>{{ incident.decision_reason }}</p><small>This is an explainable CDSS decision-support score, not an official Wazuh score.</small></details>
+    <p class="decision-summary">CDSS combined three signals to decide how quickly this alert needs attention.</p>
+    <div class="score-factors"><div><span>Detection strength</span><strong>{{ incident.rule_level_score }}</strong><small>40% of score</small></div><div><span>Threat relevance</span><strong>{{ incident.technique_risk_score }}</strong><small>40% of score</small></div><div><span>Repeat activity</span><strong>{{ incident.frequency_score }}</strong><small>20% of score</small></div></div>
+    <details><summary>Why this priority?</summary><p>{{ incident.decision_reason }}</p><small>CDSS support score; Wazuh's original rule level remains unchanged.</small></details>
   </section>
   <section class="panel detail-card"><h3>Alert context</h3><dl>
     <dt>Affected asset</dt><dd>{{ incident.agent_name or 'Unknown agent' }}{% if incident.agent_id %} (#{{ incident.agent_id }}){% endif %}{% if incident.agent_ip %}<br>{{ incident.agent_ip }}{% endif %}</dd>

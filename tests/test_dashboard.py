@@ -36,6 +36,8 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Infrastructure overview", response.data)
         self.assertIn(b"Vulnerability coverage", response.data)
+        self.assertIn(b"view=actionable", response.data)
+        self.assertIn(b"severity=critical", response.data)
         incidents = self.authenticated_client().get("/incidents")
         self.assertEqual(incidents.status_code, 200)
         self.assertIn(b"Security incidents", incidents.data)
@@ -46,6 +48,11 @@ class DashboardTests(unittest.TestCase):
         response = client.get("/incidents?severity=invalid&page=not-a-number&q=" + "x" * 500)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(client.get("/incidents/999999").status_code, 404)
+
+    def test_actionable_dashboard_link_filters_incidents(self):
+        response = self.authenticated_client().get("/incidents?view=actionable")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(b'<span class="badge low">', response.data)
 
     def test_dashboard_requires_login(self):
         response = app.test_client().get("/")

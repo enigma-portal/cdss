@@ -23,20 +23,23 @@ def _safe_page():
 def _filters():
     search = request.args.get("q", "").strip()[:100]
     severity = request.args.get("severity", "").lower()
-    return search, severity if severity in SEVERITIES else ""
+    view = request.args.get("view", "").lower()
+    return search, severity if severity in SEVERITIES else "", view if view == "actionable" else ""
 
 
 def _dashboard_data():
     page = _safe_page()
-    search, severity = _filters()
+    search, severity, view = _filters()
     conditions, parameters = [], []
     if severity:
         conditions.append("incidents.severity_label = ?")
         parameters.append(severity)
+    elif view == "actionable":
+        conditions.append("incidents.severity_label IN ('critical', 'high')")
     if search:
-        conditions.append("(incidents.title LIKE ? OR alerts.rule_id LIKE ? OR alerts.agent_name LIKE ? OR alerts.source_ip LIKE ?)")
+        conditions.append("(incidents.title LIKE ? OR incidents.technique_id LIKE ? OR alerts.rule_id LIKE ? OR alerts.agent_name LIKE ? OR alerts.source_ip LIKE ?)")
         value = f"%{search}%"
-        parameters.extend([value] * 4)
+        parameters.extend([value] * 5)
     where = " WHERE " + " AND ".join(conditions) if conditions else ""
 
     connection = get_db_connection()
@@ -65,7 +68,7 @@ def _dashboard_data():
         ).fetchall()
         return dict(totals), [dict(row) for row in incidents], {
             "page": page, "pages": max(1, ceil(filtered_total / PAGE_SIZE)),
-            "total": filtered_total, "q": search, "severity": severity,
+            "total": filtered_total, "q": search, "severity": severity, "view": view,
         }
     finally:
         connection.close()
