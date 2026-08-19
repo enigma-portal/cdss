@@ -23,6 +23,24 @@ SAMPLE_ALERT = {
 
 
 class IncidentProcessorTests(unittest.TestCase):
+    def test_successful_login_uses_verification_not_compromise_assumption(self):
+        alert = dict(SAMPLE_ALERT)
+        alert["id"] = "normal-login"
+        alert["rule"] = {"id": "60106", "level": 3,
+                         "description": "Windows logon success.",
+                         "mitre": {"id": ["T1078"]}}
+        original_database = database.DATABASE
+        with tempfile.TemporaryDirectory() as directory:
+            database.DATABASE = Path(directory) / "cdss-test.db"
+            try:
+                seed_knowledge_base()
+                result = process_alert(alert)
+            finally:
+                database.DATABASE = original_database
+        self.assertEqual(result["severity"], "low")
+        self.assertIn("Confirm the login", result["recommendations"][0]["action_text"])
+        self.assertNotIn("compromised", result["recommendations"][0]["action_text"])
+
     def test_event_without_mitre_gets_framework_recommendations(self):
         alert = dict(SAMPLE_ALERT)
         alert["id"] = "no-mitre-alert"

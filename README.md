@@ -9,6 +9,9 @@ The risk score is a project-specific decision-support score, not an official
 Wazuh score. It combines normalized Wazuh rule level (40%), MITRE technique base
 risk (40%), and same-rule recurrence during the previous hour (20%). Priority
 bands are P1 critical (8–10), P2 high (6–7.99), P3 medium (3–5.99), and P4 low.
+An ATT&CK tag is treated as context, not proof of compromise: routine successful
+authentication is confidence-capped and does not escalate merely because it is
+frequent, while failure/attack indicators allow the reviewed technique risk.
 
 ## Setup
 

@@ -7,3 +7,4 @@
 details { border-top: 1px solid var(--line); padding-top: .75rem; }
 summary { color: var(--blue); cursor: pointer; font-weight: 700; }
 details p, details small { color: var(--muted); }
+abbr { color: var(--blue); cursor: help; text-decoration: underline dotted; }

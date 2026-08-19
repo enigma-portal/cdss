@@ -53,8 +53,29 @@ def _frequency_count(connection, parsed):
         WHERE rule_id = ?
           AND COALESCE(agent_id, '') = COALESCE(?, '')
           AND event_timestamp >= ?
-    """, (parsed.rule_id, parsed.agent_id, window_start)).fetchone()
+          AND event_timestamp <= ?
+    """, (parsed.rule_id, parsed.agent_id, window_start, parsed.event_timestamp)).fetchone()
     return row["total"] + 1
+
+
+def _contextual_inputs(base_risk, parsed, event_count):
+    """Avoid treating an ATT&CK tag alone as proof of malicious activity."""
+    description = (parsed.rule_description or "").lower()
+    suspicious = any(word in description for word in (
+        "failed", "invalid", "non-existent", "brute", "possible", "attack",
+        "malware", "dropped", "denied", "tamper", "unauthorized",
+    ))
+    routine_success = any(phrase in description for phrase in (
+        "windows logon success", "login session opened", "login session closed",
+        "authentication success",
+    ))
+    if routine_success and not suspicious and (parsed.rule_level or 0) <= 4:
+        return min(base_risk, 3.0), 1, "Routine successful activity; ATT&CK tag retained as context, not malicious proof."
+    if not suspicious and (parsed.rule_level or 0) <= 3:
+        return min(base_risk, 4.0), event_count, "Low-level detection; technique risk capped pending corroborating evidence."
+    if not suspicious and (parsed.rule_level or 0) <= 6:
+        return min(base_risk, 6.0), event_count, "Moderate-confidence detection; technique risk limited pending corroboration."
+    return base_risk, event_count, "Technique risk applied because alert context contains suspicious evidence."
 
 
 def process_alert(raw_alert):
@@ -90,11 +111,14 @@ def process_alert(raw_alert):
             else:
                 alert_id = cursor.lastrowid
 
-            technique_risk = _base_technique_risk(connection, technique_id)
-            risk = calculate_risk(parsed.rule_level, technique_risk, frequency_count)
+            base_risk = _base_technique_risk(connection, technique_id)
+            technique_risk, scoring_count, context_reason = _contextual_inputs(
+                base_risk, parsed, frequency_count,
+            )
+            risk = calculate_risk(parsed.rule_level, technique_risk, scoring_count)
             severity = severity_for_risk(risk.final_risk_score)
             priority = priority_for_risk(risk.final_risk_score)
-            explanation = explain_risk(risk)
+            explanation = f"{explain_risk(risk)} {context_reason}"
             title = parsed.rule_description or f"Wazuh rule {parsed.rule_id} incident"
             incident_cursor = connection.execute("""
                 INSERT INTO incidents

@@ -28,6 +28,15 @@ def _curated_mitre(connection, technique_id, risk_score):
 
 def _fallback(description, rule_groups=()):
     context = " ".join([description or "", *rule_groups]).lower()
+    if any(phrase in context for phrase in (
+        "windows logon success", "login session opened", "login session closed",
+        "authentication success",
+    )) and not any(word in context for word in ("possible", "attack", "failed", "invalid")):
+        return [
+            ("Confirm the login matches the expected user, endpoint, time, and access method.", "Validation", 1, "NIST SP 800-61", "Detection and Analysis"),
+            ("Correlate the session with preceding failures, unusual remote access, or privilege changes.", "Analysis", 2, "NIST CSF", "DE.AE / RS.AN"),
+            ("Take containment action only if the session is unauthorized or corroborating evidence is found.", "Conditional containment", 3, "CIS Controls v8", "Controls 5, 6 and 8"),
+        ]
     if any(word in context for word in ("login", "authentication", "password", "brute", "credential")):
         return [
             ("Review authentication logs and identify failed and successful logins from the same source.", "Analysis", 1, "NIST CSF", "DE.AE / RS.AN"),
@@ -79,16 +88,28 @@ def generate_recommendations(
     connection, technique_id, risk_score, description=None, rule_groups=(),
     source_ip=None, agent_name=None, agent_ip=None,
 ):
-    recommendations = _curated_mitre(connection, technique_id, risk_score)
+    context = " ".join([description or "", *rule_groups]).lower()
+    routine_success = any(phrase in context for phrase in (
+        "windows logon success", "login session opened", "login session closed",
+        "authentication success",
+    )) and not any(word in context for word in ("possible", "attack", "failed", "invalid"))
+    recommendations = [] if routine_success else _curated_mitre(
+        connection, technique_id, risk_score,
+    )
     scope = _scope(source_ip, agent_name, agent_ip)
     if recommendations:
         for item in recommendations:
             item["rationale"] += f" Scope: {scope}."
         return recommendations
+    fallback_reason = (
+        "Verification-first guidance because successful activity is not malicious proof."
+        if routine_success else
+        "Context-based fallback because no curated ATT&CK mapping was present."
+    )
     return [{
         "action_text": action, "response_phase": phase, "priority": priority,
         "framework": framework, "control_reference": reference,
-        "rationale": f"Context-based fallback because no curated ATT&CK mapping was present. Scope: {scope}.",
+        "rationale": f"{fallback_reason} Scope: {scope}.",
     } for action, phase, priority, framework, reference in _fallback(description, rule_groups)]
 
 
