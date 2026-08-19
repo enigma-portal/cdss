@@ -7,7 +7,7 @@ def _curated_mitre(connection, technique_id, risk_score):
     rows = connection.execute("""
         SELECT recommendations.action_text, recommendations.response_phase,
                recommendations.priority, knowledge_base.nist_ir_guidance,
-               knowledge_base.cis_control
+               knowledge_base.cis_control, knowledge_base.d3fend_technique
         FROM recommendations
         JOIN knowledge_base ON knowledge_base.id = recommendations.knowledge_base_id
         WHERE knowledge_base.technique_id = ? AND recommendations.is_active = 1
@@ -18,9 +18,11 @@ def _curated_mitre(connection, technique_id, risk_score):
         "action_text": row["action_text"],
         "response_phase": row["response_phase"] or "Analysis",
         "priority": row["priority"],
-        "framework": "MITRE ATT&CK + NIST/CIS",
-        "control_reference": " / ".join(filter(None, [row["nist_ir_guidance"], row["cis_control"]])),
-        "rationale": f"Curated response for ATT&CK {technique_id}.",
+        "framework": "MITRE D3FEND + NIST/CIS",
+        "control_reference": " / ".join(filter(None, [
+            row["d3fend_technique"], row["nist_ir_guidance"], row["cis_control"],
+        ])),
+        "rationale": f"Curated defensive mapping for ATT&CK {technique_id}.",
     } for row in rows]
 
 
@@ -63,14 +65,30 @@ def _fallback(description, rule_groups=()):
     ]
 
 
-def generate_recommendations(connection, technique_id, risk_score, description=None, rule_groups=()):
+def _scope(source_ip=None, agent_name=None, agent_ip=None):
+    endpoint = agent_name or agent_ip
+    parts = []
+    if source_ip:
+        parts.append(f"observed source {source_ip}")
+    if endpoint:
+        parts.append(f"affected endpoint {endpoint}")
+    return "; ".join(parts) or "the affected system"
+
+
+def generate_recommendations(
+    connection, technique_id, risk_score, description=None, rule_groups=(),
+    source_ip=None, agent_name=None, agent_ip=None,
+):
     recommendations = _curated_mitre(connection, technique_id, risk_score)
+    scope = _scope(source_ip, agent_name, agent_ip)
     if recommendations:
+        for item in recommendations:
+            item["rationale"] += f" Scope: {scope}."
         return recommendations
     return [{
         "action_text": action, "response_phase": phase, "priority": priority,
         "framework": framework, "control_reference": reference,
-        "rationale": "Context-based fallback because no curated ATT&CK mapping was present.",
+        "rationale": f"Context-based fallback because no curated ATT&CK mapping was present. Scope: {scope}.",
     } for action, phase, priority, framework, reference in _fallback(description, rule_groups)]
 
 
@@ -94,6 +112,7 @@ def get_incident_recommendations(connection, incident_id):
 def backfill_recommendations(connection):
     rows = connection.execute("""
         SELECT incidents.id, incidents.technique_id, alerts.rule_description,
+               alerts.source_ip, alerts.agent_name, alerts.agent_ip,
                COALESCE(risk_scores.final_risk_score, 0) AS risk_score
         FROM incidents JOIN alerts ON alerts.id = incidents.alert_id
         LEFT JOIN risk_scores ON risk_scores.incident_id = incidents.id
@@ -102,6 +121,13 @@ def backfill_recommendations(connection):
     for row in rows:
         items = generate_recommendations(
             connection, row["technique_id"], row["risk_score"], row["rule_description"], (),
+            row["source_ip"], row["agent_name"], row["agent_ip"],
         )
         save_recommendations(connection, row["id"], items)
     return len(rows)
+
+
+def rebuild_recommendations(connection):
+    """Explicitly refresh stored decisions after a reviewed framework update."""
+    connection.execute("DELETE FROM incident_recommendations")
+    return backfill_recommendations(connection)

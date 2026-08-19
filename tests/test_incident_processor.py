@@ -57,6 +57,8 @@ class IncidentProcessorTests(unittest.TestCase):
         self.assertEqual(result["priority"], "P2")
         self.assertIn("CDSS decision-support score", result["explanation"])
         self.assertEqual(len(result["recommendations"]), 2)
+        self.assertEqual(result["recommendations"][0]["framework"], "MITRE D3FEND + NIST/CIS")
+        self.assertIn("Authentication Monitoring", result["recommendations"][0]["control_reference"])
         self.assertFalse(duplicate["created"])
         self.assertEqual(duplicate["incident_id"], result["incident_id"])
 

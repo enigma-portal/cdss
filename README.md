@@ -38,8 +38,9 @@ python run.py
 Open the local port configured by `CDSS_PORT` (default `5001`). The dashboard
 shows searchable, paginated history. Every incident opens into a detail view
 with scoring evidence and persisted defensive actions. Known ATT&CK techniques
-use curated mappings; other events use labelled NIST SP 800-61, NIST CSF, and
-CIS Controls v8 contextual fallbacks instead of returning an empty decision.
+use reviewed MITRE D3FEND countermeasures connected to NIST and CIS controls;
+other events use labelled NIST SP 800-61, NIST CSF, and CIS Controls v8
+contextual fallbacks instead of returning an empty decision.
 
 Optional MITRE catalogue refresh:
 

@@ -120,7 +120,8 @@ def process_alert(raw_alert):
             groups = tuple((raw_alert.get("rule") or {}).get("groups") or ())
             recommendations = generate_recommendations(
                 connection, technique_id, risk.final_risk_score,
-                parsed.rule_description, groups,
+                parsed.rule_description, groups, parsed.source_ip,
+                parsed.agent_name, parsed.agent_ip,
             )
             save_recommendations(connection, incident_id, recommendations)
             return {

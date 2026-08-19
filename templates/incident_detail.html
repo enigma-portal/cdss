@@ -8,15 +8,18 @@
 </section>
 
 <div class="detail-grid">
-  <section class="panel detail-card"><h3>Decision explanation</h3><p>{{ incident.decision_reason }}</p>
-    <dl><dt>Rule component</dt><dd>{{ incident.rule_level_score }}/10</dd><dt>Technique component</dt><dd>{{ incident.technique_risk_score }}/10</dd><dt>Frequency component</dt><dd>{{ incident.frequency_score }}/10</dd></dl>
+  <section class="panel detail-card"><h3>Decision factors</h3>
+    <p class="decision-summary">{{ incident.severity_label|title }} response priority based on detection strength, defensive context, and recurrence.</p>
+    <div class="score-factors"><div><strong>{{ incident.rule_level_score }}</strong><span>Rule · 40%</span></div><div><strong>{{ incident.technique_risk_score }}</strong><span>Context · 40%</span></div><div><strong>{{ incident.frequency_score }}</strong><span>Frequency · 20%</span></div></div>
+    <details><summary>Scoring methodology</summary><p>{{ incident.decision_reason }}</p><small>This is an explainable CDSS decision-support score, not an official Wazuh score.</small></details>
   </section>
   <section class="panel detail-card"><h3>Alert context</h3><dl>
-    <dt>Agent</dt><dd>{{ incident.agent_name or 'Not provided' }}{% if incident.agent_ip %} ({{ incident.agent_ip }}){% endif %}</dd>
-    <dt>Source IP</dt><dd>{{ incident.source_ip or 'Not provided' }}</dd><dt>Destination IP</dt><dd>{{ incident.destination_ip or 'Not provided' }}</dd>
-    <dt>Wazuh alert ID</dt><dd>{{ incident.wazuh_alert_id or 'Not provided' }}</dd><dt>Status</dt><dd>{{ incident.status|title }}</dd>
+    <dt>Affected agent</dt><dd>{{ incident.agent_name or 'Not supplied by Wazuh' }}{% if incident.agent_id %} (#{{ incident.agent_id }}){% endif %}</dd>
+    <dt>Endpoint IP</dt><dd>{{ incident.agent_ip or 'Not present in the original Wazuh alert' }}</dd>
+    <dt>Observed source IP</dt><dd>{{ incident.source_ip or 'Not present — common for local/host events' }}</dd><dt>Observed destination IP</dt><dd>{{ incident.destination_ip or 'Not present in the original Wazuh alert' }}</dd>
+    <dt>Wazuh alert ID</dt><dd>{{ incident.wazuh_alert_id or 'Not supplied by Wazuh' }}</dd><dt>Status</dt><dd>{{ incident.status|title }}</dd>
   </dl></section>
-  <section class="panel detail-card"><h3>Framework mapping</h3><dl><dt>MITRE ID</dt><dd>{{ incident.technique_id or 'No ATT&CK mapping supplied by Wazuh' }}</dd><dt>Technique</dt><dd>{{ incident.technique_name or 'Context-based fallback used' }}</dd><dt>Tactic</dt><dd>{{ incident.tactic or 'Not available' }}</dd></dl></section>
+  <section class="panel detail-card"><h3>Defense mapping</h3><dl><dt>ATT&CK technique</dt><dd>{% if incident.technique_id %}{{ incident.technique_id }} · {{ incident.technique_name }}{% else %}No mapping supplied by Wazuh{% endif %}</dd><dt>ATT&CK tactic</dt><dd>{{ incident.tactic or 'Not available' }}</dd><dt>MITRE D3FEND</dt><dd>{{ incident.d3fend_technique or 'Context-based NIST/CIS fallback' }}</dd><dt>NIST guidance</dt><dd>{{ incident.nist_ir_guidance or 'Determined per response action below' }}</dd><dt>CIS control</dt><dd>{{ incident.cis_control or 'Determined per response action below' }}</dd></dl></section>
 </div>
 
 <section class="panel recommendations"><div class="panel-heading"><div><p class="eyebrow">DECISION SUPPORT</p><h2>Recommended response</h2></div></div>

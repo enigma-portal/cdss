@@ -89,10 +89,13 @@ def incident_detail(incident_id):
                    mitre_techniques.technique_name, mitre_techniques.tactic,
                    risk_scores.rule_level_score, risk_scores.technique_risk_score,
                    risk_scores.frequency_score, risk_scores.final_risk_score,
-                   risk_scores.calculation_details
+                   risk_scores.calculation_details,
+                   knowledge_base.d3fend_technique,
+                   knowledge_base.nist_ir_guidance, knowledge_base.cis_control
             FROM incidents JOIN alerts ON alerts.id = incidents.alert_id
             LEFT JOIN mitre_techniques ON mitre_techniques.technique_id = incidents.technique_id
             LEFT JOIN risk_scores ON risk_scores.incident_id = incidents.id
+            LEFT JOIN knowledge_base ON knowledge_base.technique_id = incidents.technique_id
             WHERE incidents.id = ?
         """, (incident_id,)).fetchone()
         if not incident:
