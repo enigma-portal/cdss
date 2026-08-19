@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="30">
   <title>{{ config.PROJECT_TITLE }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
@@ -11,6 +12,7 @@
     <div class="container">
       <p class="eyebrow">WAZUH SIEM · MITRE ATT&CK</p>
       <h1>{{ config.PROJECT_TITLE }}</h1>
+      <p class="live"><span></span> Live monitoring · refreshes every 30 seconds</p>
     </div>
   </header>
   <main class="container">

@@ -7,7 +7,7 @@ from app.risk_engine.scoring import (
     calculate_risk, explain_risk, priority_for_risk, severity_for_risk,
 )
 from app.services.alert_parser import parse_alert
-from app.services.recommendation_engine import get_recommendations
+from app.services.recommendation_engine import generate_recommendations, save_recommendations
 from app.services.wazuh_indexer import WazuhIndexerClient
 
 
@@ -117,7 +117,12 @@ def process_alert(raw_alert):
                 risk.frequency_score, risk.final_risk_score,
                 "40% Wazuh rule level, 40% MITRE technique base risk, 20% one-hour event frequency.",
             ))
-            recommendations = get_recommendations(connection, technique_id, risk.final_risk_score)
+            groups = tuple((raw_alert.get("rule") or {}).get("groups") or ())
+            recommendations = generate_recommendations(
+                connection, technique_id, risk.final_risk_score,
+                parsed.rule_description, groups,
+            )
+            save_recommendations(connection, incident_id, recommendations)
             return {
                 "incident_id": incident_id,
                 "created": True,
@@ -125,13 +130,15 @@ def process_alert(raw_alert):
                 "severity": severity,
                 "priority": priority,
                 "explanation": explanation,
-                "recommendations": [dict(row) for row in recommendations],
+                "recommendations": recommendations,
             }
     finally:
         connection.close()
 
 
-def process_indexer_alerts(size=100, since=None, client=None):
+def process_indexer_alerts(size=100, since=None, client=None, sort_order="desc"):
     """Fetch a bounded batch from Wazuh Indexer and process each alert."""
     client = client or WazuhIndexerClient.from_environment()
-    return [process_alert(alert) for alert in client.fetch_alerts(size=size, since=since)]
+    return [process_alert(alert) for alert in client.fetch_alerts(
+        size=size, since=since, sort_order=sort_order,
+    )]

@@ -240,6 +240,21 @@ def initialize_database():
                     FOREIGN KEY (incident_id) REFERENCES incidents(id)
                         ON UPDATE CASCADE ON DELETE CASCADE
                 );
+
+                CREATE TABLE IF NOT EXISTS incident_recommendations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    incident_id INTEGER NOT NULL,
+                    action_text TEXT NOT NULL,
+                    response_phase TEXT NOT NULL,
+                    priority INTEGER NOT NULL CHECK (priority BETWEEN 1 AND 10),
+                    framework TEXT NOT NULL,
+                    control_reference TEXT,
+                    rationale TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (incident_id, action_text),
+                    FOREIGN KEY (incident_id) REFERENCES incidents(id)
+                        ON UPDATE CASCADE ON DELETE CASCADE
+                );
             """)
 
             alert_exists = connection.execute(
@@ -269,6 +284,8 @@ def initialize_database():
                 CREATE INDEX IF NOT EXISTS idx_risk_scores_incident_id ON risk_scores(incident_id);
                 CREATE INDEX IF NOT EXISTS idx_recommendations_knowledge_base_id
                     ON recommendations(knowledge_base_id);
+                CREATE INDEX IF NOT EXISTS idx_incident_recommendations_incident_id
+                    ON incident_recommendations(incident_id);
             """)
     finally:
         connection.close()

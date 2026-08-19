@@ -1,61 +1,44 @@
 {% extends "base.html" %}
-
 {% block content %}
-  <section class="summary" aria-label="Incident summary">
-    <article><span>Total incidents</span><strong>{{ totals.total or 0 }}</strong></article>
-    <article class="critical"><span>Critical</span><strong>{{ totals.critical or 0 }}</strong></article>
-    <article class="high"><span>High</span><strong>{{ totals.high or 0 }}</strong></article>
-    <article><span>Open</span><strong>{{ totals.open or 0 }}</strong></article>
-  </section>
+<section class="summary" aria-label="Incident summary">
+  <article><span>Total incidents</span><strong>{{ totals.total }}</strong></article>
+  <article class="critical"><span>Critical</span><strong>{{ totals.critical }}</strong></article>
+  <article class="high"><span>High</span><strong>{{ totals.high }}</strong></article>
+  <article><span>Open</span><strong>{{ totals.open }}</strong></article>
+</section>
 
-  <section class="panel">
-    <div class="panel-heading">
-      <div>
-        <p class="eyebrow">LATEST DECISIONS</p>
-        <h2>Processed incidents</h2>
-      </div>
-      <p>{{ incidents|length }} shown</p>
-    </div>
-
-    {% if incidents %}
-      <div class="incident-list">
-      {% for incident in incidents %}
-        <article class="incident">
-          <div class="incident-main">
-            <div class="incident-title">
-              <span class="badge {{ incident.severity_label }}">{{ incident.severity_label }}</span>
-              {% if incident.priority %}<span class="priority">{{ incident.priority }}</span>{% endif %}
-              <h3>{{ incident.title }}</h3>
-            </div>
-            <p class="metadata">
-              Incident #{{ incident.id }} · {{ incident.detected_at }}
-              {% if incident.agent_name %} · Agent: {{ incident.agent_name }}{% endif %}
-              {% if incident.source_ip %} · Source: {{ incident.source_ip }}{% endif %}
-              {% if incident.technique_id %} · {{ incident.technique_id }}{% endif %}
-            </p>
-          </div>
-          <div class="risk"><span>Risk score</span><strong>{{ "%.2f"|format(incident.final_risk_score or 0) }}/10</strong></div>
-          <div class="actions">
-            {% if incident.decision_reason %}<p class="decision"><strong>Why:</strong> {{ incident.decision_reason }}</p>{% endif %}
-            <h4>Recommended actions</h4>
-            {% if incident.recommendations %}
-              <ol>
-              {% for recommendation in incident.recommendations %}
-                <li>{{ recommendation.action_text }} <small>{{ recommendation.response_phase }}</small></li>
-              {% endfor %}
-              </ol>
-            {% else %}
-              <p>No curated action is available for this technique yet.</p>
-            {% endif %}
-          </div>
-        </article>
+<section class="panel">
+  <div class="panel-heading">
+    <div><p class="eyebrow">DECISION QUEUE</p><h2>Security incidents</h2></div>
+    <p>{{ pagination.total }} matching</p>
+  </div>
+  <form class="filters" method="get" action="{{ url_for('dashboard.index') }}">
+    <label>Search<input name="q" value="{{ pagination.q }}" maxlength="100" placeholder="Rule, agent, source IP…"></label>
+    <label>Severity<select name="severity">
+      <option value="">All severities</option>
+      {% for level in ('critical', 'high', 'medium', 'low') %}
+      <option value="{{ level }}" {% if pagination.severity == level %}selected{% endif %}>{{ level|title }}</option>
       {% endfor %}
-      </div>
-    {% else %}
-      <div class="empty-state">
-        <h3>No incidents yet</h3>
-        <p>When Wazuh Indexer alerts are processed, their risk scores and response actions will appear here.</p>
-      </div>
-    {% endif %}
-  </section>
+    </select></label>
+    <button type="submit">Apply filters</button>
+    {% if pagination.q or pagination.severity %}<a class="clear" href="{{ url_for('dashboard.index') }}">Clear</a>{% endif %}
+  </form>
+
+  {% if incidents %}<div class="table-wrap"><table>
+    <thead><tr><th>Decision</th><th>Incident</th><th>Context</th><th>Risk</th><th></th></tr></thead>
+    <tbody>{% for incident in incidents %}<tr>
+      <td><span class="badge {{ incident.severity_label }}">{{ incident.severity_label }}</span><span class="priority">{{ incident.priority }}</span></td>
+      <td><a class="incident-link" href="{{ url_for('dashboard.incident_detail', incident_id=incident.id) }}">{{ incident.title }}</a><small>#{{ incident.id }} · Rule {{ incident.rule_id }}</small></td>
+      <td><span>{{ incident.agent_name or 'Unknown agent' }}</span><small>{{ incident.source_ip or incident.detected_at }}</small></td>
+      <td><strong>{{ "%.2f"|format(incident.final_risk_score or 0) }}</strong><small>/ 10</small></td>
+      <td><a class="view" href="{{ url_for('dashboard.incident_detail', incident_id=incident.id) }}">View →</a></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  <nav class="pagination" aria-label="Incident pages">
+    {% if pagination.page > 1 %}<a href="{{ url_for('dashboard.index', page=pagination.page-1, q=pagination.q, severity=pagination.severity) }}">← Previous</a>{% endif %}
+    <span>Page {{ pagination.page }} of {{ pagination.pages }}</span>
+    {% if pagination.page < pagination.pages %}<a href="{{ url_for('dashboard.index', page=pagination.page+1, q=pagination.q, severity=pagination.severity) }}">Next →</a>{% endif %}
+  </nav>
+  {% else %}<div class="empty-state"><h3>No matching incidents</h3><p>Change the filters or wait for realtime Wazuh polling.</p></div>{% endif %}
+</section>
 {% endblock %}

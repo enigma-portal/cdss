@@ -1,17 +1,107 @@
-"""Retrieve curated CDSS response actions for an incident."""
+"""Explainable MITRE, NIST and CIS defensive recommendation engine."""
 
 
-def get_recommendations(connection, technique_id, risk_score):
-    """Return active actions whose configured risk range includes this incident."""
+def _curated_mitre(connection, technique_id, risk_score):
     if not technique_id:
         return []
-    return connection.execute("""
+    rows = connection.execute("""
         SELECT recommendations.action_text, recommendations.response_phase,
-               recommendations.priority
+               recommendations.priority, knowledge_base.nist_ir_guidance,
+               knowledge_base.cis_control
         FROM recommendations
         JOIN knowledge_base ON knowledge_base.id = recommendations.knowledge_base_id
-        WHERE knowledge_base.technique_id = ?
-          AND recommendations.is_active = 1
+        WHERE knowledge_base.technique_id = ? AND recommendations.is_active = 1
           AND ? BETWEEN recommendations.minimum_risk_score AND recommendations.maximum_risk_score
         ORDER BY recommendations.priority, recommendations.id
     """, (technique_id, risk_score)).fetchall()
+    return [{
+        "action_text": row["action_text"],
+        "response_phase": row["response_phase"] or "Analysis",
+        "priority": row["priority"],
+        "framework": "MITRE ATT&CK + NIST/CIS",
+        "control_reference": " / ".join(filter(None, [row["nist_ir_guidance"], row["cis_control"]])),
+        "rationale": f"Curated response for ATT&CK {technique_id}.",
+    } for row in rows]
+
+
+def _fallback(description, rule_groups=()):
+    context = " ".join([description or "", *rule_groups]).lower()
+    if any(word in context for word in ("login", "authentication", "password", "brute", "credential")):
+        return [
+            ("Review authentication logs and identify failed and successful logins from the same source.", "Analysis", 1, "NIST CSF", "DE.AE / RS.AN"),
+            ("Temporarily restrict the suspicious account or source when malicious activity is confirmed.", "Containment", 2, "NIST SP 800-61", "Containment"),
+            ("Enforce MFA, account lockout, and least-privilege access for affected accounts.", "Prevention", 3, "CIS Controls v8", "Controls 5 and 6"),
+        ]
+    if any(word in context for word in ("malware", "rootkit", "virus", "trojan", "anomaly")):
+        return [
+            ("Validate the detection and inspect related processes, files, hashes, and parent-child activity.", "Analysis", 1, "NIST SP 800-61", "Detection and Analysis"),
+            ("Isolate the endpoint if malicious execution is confirmed while preserving forensic evidence.", "Containment", 2, "NIST SP 800-61", "Containment"),
+            ("Update anti-malware controls and investigate persistence across the environment.", "Eradication", 3, "CIS Controls v8", "Control 10"),
+        ]
+    if any(word in context for word in ("benchmark", "configuration", "policy", "compliance", "partition")):
+        return [
+            ("Confirm whether the reported configuration deviates from the approved secure baseline.", "Analysis", 1, "CIS Controls v8", "Control 4"),
+            ("Create a tested remediation change and obtain system-owner approval before applying it.", "Remediation", 2, "NIST CSF", "PR.IP / GV.PO"),
+            ("Re-scan the host after remediation and record accepted exceptions with business justification.", "Recovery", 3, "CIS Controls v8", "Controls 4 and 7"),
+        ]
+    if any(word in context for word in ("network", "firewall", "port", "connection", "packet", "dns")):
+        return [
+            ("Correlate source, destination, port, protocol, and surrounding network events.", "Analysis", 1, "NIST SP 800-61", "Detection and Analysis"),
+            ("Block or rate-limit confirmed malicious traffic using the narrowest effective rule.", "Containment", 2, "CIS Controls v8", "Controls 12 and 13"),
+            ("Review segmentation and monitoring coverage for the affected network path.", "Prevention", 3, "NIST CSF", "PR.PT / DE.CM"),
+        ]
+    if any(word in context for word in ("file", "integrity", "permission", "modified")):
+        return [
+            ("Verify the file change against an approved deployment or administrator action.", "Analysis", 1, "NIST SP 800-61", "Detection and Analysis"),
+            ("Preserve file metadata and compare the current hash with the trusted baseline.", "Evidence", 2, "CIS Controls v8", "Control 3"),
+            ("Restore the trusted version and review permissions if the change is unauthorized.", "Recovery", 3, "CIS Controls v8", "Controls 3 and 4"),
+        ]
+    return [
+        ("Validate the alert against the affected host and correlate events around the detection time.", "Analysis", 1, "NIST SP 800-61", "Detection and Analysis"),
+        ("Preserve relevant logs and document the analyst's findings before changing the system.", "Evidence", 2, "NIST SP 800-61", "Incident Documentation"),
+        ("Escalate to the system owner when impact is unclear or activity remains unexplained.", "Escalation", 3, "NIST CSF", "RS.CO / RS.AN"),
+    ]
+
+
+def generate_recommendations(connection, technique_id, risk_score, description=None, rule_groups=()):
+    recommendations = _curated_mitre(connection, technique_id, risk_score)
+    if recommendations:
+        return recommendations
+    return [{
+        "action_text": action, "response_phase": phase, "priority": priority,
+        "framework": framework, "control_reference": reference,
+        "rationale": "Context-based fallback because no curated ATT&CK mapping was present.",
+    } for action, phase, priority, framework, reference in _fallback(description, rule_groups)]
+
+
+def save_recommendations(connection, incident_id, recommendations):
+    for item in recommendations:
+        connection.execute("""
+            INSERT OR IGNORE INTO incident_recommendations
+                (incident_id, action_text, response_phase, priority, framework,
+                 control_reference, rationale) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (incident_id, item["action_text"], item["response_phase"], item["priority"],
+              item["framework"], item.get("control_reference"), item.get("rationale")))
+
+
+def get_incident_recommendations(connection, incident_id):
+    return connection.execute("""
+        SELECT action_text, response_phase, priority, framework, control_reference, rationale
+        FROM incident_recommendations WHERE incident_id = ? ORDER BY priority, id
+    """, (incident_id,)).fetchall()
+
+
+def backfill_recommendations(connection):
+    rows = connection.execute("""
+        SELECT incidents.id, incidents.technique_id, alerts.rule_description,
+               COALESCE(risk_scores.final_risk_score, 0) AS risk_score
+        FROM incidents JOIN alerts ON alerts.id = incidents.alert_id
+        LEFT JOIN risk_scores ON risk_scores.incident_id = incidents.id
+        WHERE NOT EXISTS (SELECT 1 FROM incident_recommendations ir WHERE ir.incident_id = incidents.id)
+    """).fetchall()
+    for row in rows:
+        items = generate_recommendations(
+            connection, row["technique_id"], row["risk_score"], row["rule_description"], (),
+        )
+        save_recommendations(connection, row["id"], items)
+    return len(rows)

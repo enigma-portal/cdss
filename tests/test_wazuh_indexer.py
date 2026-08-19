@@ -23,6 +23,7 @@ class WazuhIndexerClientTests(unittest.TestCase):
         self.assertEqual(alerts[0]["id"], "indexer-id")
         request_body = json.loads(open_request.call_args.args[0].data.decode("utf-8"))
         self.assertEqual(request_body["query"]["bool"]["filter"][0]["range"]["timestamp"]["gte"], "2026-08-12T00:00:00Z")
+        self.assertEqual(request_body["sort"][0]["timestamp"]["order"], "desc")
 
 
 if __name__ == "__main__":

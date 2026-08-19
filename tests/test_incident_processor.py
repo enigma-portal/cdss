@@ -23,6 +23,24 @@ SAMPLE_ALERT = {
 
 
 class IncidentProcessorTests(unittest.TestCase):
+    def test_event_without_mitre_gets_framework_recommendations(self):
+        alert = dict(SAMPLE_ALERT)
+        alert["id"] = "no-mitre-alert"
+        alert["rule"] = {
+            "id": "19007", "level": 7,
+            "description": "CIS benchmark configuration policy failed.",
+        }
+        original_database = database.DATABASE
+        with tempfile.TemporaryDirectory() as directory:
+            database.DATABASE = Path(directory) / "cdss-test.db"
+            try:
+                seed_knowledge_base()
+                result = process_alert(alert)
+            finally:
+                database.DATABASE = original_database
+        self.assertEqual(len(result["recommendations"]), 3)
+        self.assertEqual(result["recommendations"][0]["framework"], "CIS Controls v8")
+
     def test_creates_one_scored_incident_and_returns_recommendations(self):
         original_database = database.DATABASE
         with tempfile.TemporaryDirectory() as directory:

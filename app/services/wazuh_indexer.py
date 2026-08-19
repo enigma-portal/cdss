@@ -69,7 +69,7 @@ class WazuhIndexerClient:
                 "Could not connect to the Wazuh Indexer API. Check the URL, TLS setting, and network access."
             ) from error
 
-    def fetch_alerts(self, size=100, since=None):
+    def fetch_alerts(self, size=100, since=None, sort_order="desc"):
         """Return newest matching raw Wazuh alert documents.
 
         ``since`` accepts an ISO-8601 time string understood by OpenSearch, for
@@ -77,13 +77,15 @@ class WazuhIndexerClient:
         """
         if not 1 <= size <= 10_000:
             raise ValueError("size must be between 1 and 10,000.")
+        if sort_order not in {"asc", "desc"}:
+            raise ValueError("sort_order must be 'asc' or 'desc'.")
         filters = []
         if since:
             filters.append({"range": {"timestamp": {"gte": since}}})
         query = {"bool": {"filter": filters}} if filters else {"match_all": {}}
         payload = {
             "size": size,
-            "sort": [{"timestamp": {"order": "asc"}}, {"_id": {"order": "asc"}}],
+            "sort": [{"timestamp": {"order": sort_order}}, {"_id": {"order": sort_order}}],
             "query": query,
         }
         safe_index = quote(self.index_name, safe="*,-")

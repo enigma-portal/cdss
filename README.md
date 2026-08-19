@@ -25,16 +25,21 @@ python -m unittest discover -s tests -v
 
 ## Demonstration
 
-Seed the defensive knowledge base, ingest a small read-only batch, then start the
-dashboard. The approved web entry point remains `run.py`.
+Seed the defensive knowledge base, optionally import history, then start the
+dashboard. The approved web entry point remains `run.py`. While it is running,
+the app polls Wazuh every 30 seconds and safely skips duplicate alert IDs.
 
 ```bash
-python -m app.services.ingest --size 20
+python -m app.services.ingest --size 500 --order asc
+python -m app.services.ingest --size 500 --order desc
 python run.py
 ```
 
-Open `http://127.0.0.1:5000`. The dashboard shows severity, priority, score,
-reasoning, affected agent/source, MITRE ID, and defensive recommendations.
+Open the local port configured by `CDSS_PORT` (default `5001`). The dashboard
+shows searchable, paginated history. Every incident opens into a detail view
+with scoring evidence and persisted defensive actions. Known ATT&CK techniques
+use curated mappings; other events use labelled NIST SP 800-61, NIST CSF, and
+CIS Controls v8 contextual fallbacks instead of returning an empty decision.
 
 Optional MITRE catalogue refresh:
 
@@ -50,3 +55,5 @@ python -m app.mitre.taxii_sync
 - TLS verification should remain enabled outside a self-signed isolated lab.
 - Unknown MITRE techniques receive a neutral default risk and no invented advice.
 - Controlled attacks must only be performed against authorized lab systems.
+- The app binds to loopback only, uses security headers, limits filter input,
+  parameterizes database queries, and never displays or logs Indexer credentials.
