@@ -55,6 +55,9 @@ def _migrate_legacy_alerts(connection):
     if not existing_columns or required_columns.issubset(existing_columns):
         return
 
+    # Prevent SQLite from rewriting existing incident foreign keys to the
+    # temporary table name while the alert table is rebuilt.
+    connection.execute("PRAGMA legacy_alter_table = ON")
     connection.execute("ALTER TABLE alerts RENAME TO alerts_legacy")
     _create_alerts_table(connection)
     connection.execute("""
@@ -76,6 +79,79 @@ def _migrate_legacy_alerts(connection):
         FROM alerts_legacy
     """)
     connection.execute("DROP TABLE alerts_legacy")
+    connection.execute("PRAGMA legacy_alter_table = OFF")
+
+
+def _repair_incident_alert_foreign_key(connection):
+    """Repair databases created by the earlier legacy-alert migration."""
+    targets = {
+        row["table"] for row in connection.execute("PRAGMA foreign_key_list(incidents)")
+    }
+    if "alerts_legacy" not in targets:
+        return
+
+    connection.execute("PRAGMA legacy_alter_table = ON")
+    connection.execute("ALTER TABLE incidents RENAME TO incidents_broken_fk")
+    connection.execute("""
+        CREATE TABLE incidents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            alert_id INTEGER NOT NULL,
+            technique_id TEXT,
+            title TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'open'
+                CHECK (status IN ('open', 'investigating', 'contained', 'closed')),
+            severity_label TEXT CHECK (severity_label IN ('low', 'medium', 'high', 'critical')),
+            detected_at TEXT NOT NULL,
+            summary TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            priority TEXT,
+            decision_reason TEXT,
+            FOREIGN KEY (alert_id) REFERENCES alerts(id)
+                ON UPDATE CASCADE ON DELETE RESTRICT,
+            FOREIGN KEY (technique_id) REFERENCES mitre_techniques(technique_id)
+                ON UPDATE CASCADE ON DELETE SET NULL
+        )
+    """)
+    connection.execute("""
+        INSERT INTO incidents
+            (id, alert_id, technique_id, title, status, severity_label,
+             detected_at, summary, created_at, updated_at, priority, decision_reason)
+        SELECT id, alert_id, technique_id, title, status, severity_label,
+               detected_at, summary, created_at, updated_at, priority, decision_reason
+        FROM incidents_broken_fk
+    """)
+    connection.execute("DROP TABLE incidents_broken_fk")
+    connection.execute("PRAGMA legacy_alter_table = OFF")
+
+
+def _repair_risk_score_incident_foreign_key(connection):
+    targets = {
+        row["table"] for row in connection.execute("PRAGMA foreign_key_list(risk_scores)")
+    }
+    if "incidents_broken_fk" not in targets:
+        return
+
+    connection.execute("ALTER TABLE risk_scores RENAME TO risk_scores_broken_fk")
+    connection.execute("""
+        CREATE TABLE risk_scores (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            incident_id INTEGER NOT NULL,
+            rule_level_score REAL NOT NULL CHECK (rule_level_score BETWEEN 0 AND 10),
+            technique_risk_score REAL NOT NULL CHECK (technique_risk_score BETWEEN 0 AND 10),
+            frequency_score REAL NOT NULL CHECK (frequency_score BETWEEN 0 AND 10),
+            final_risk_score REAL NOT NULL CHECK (final_risk_score BETWEEN 0 AND 10),
+            calculation_details TEXT,
+            calculated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (incident_id) REFERENCES incidents(id)
+                ON UPDATE CASCADE ON DELETE CASCADE
+        )
+    """)
+    connection.execute("""
+        INSERT INTO risk_scores
+        SELECT * FROM risk_scores_broken_fk
+    """)
+    connection.execute("DROP TABLE risk_scores_broken_fk")
 
 
 def initialize_database():
@@ -173,6 +249,9 @@ def initialize_database():
                 _migrate_legacy_alerts(connection)
             else:
                 _create_alerts_table(connection)
+
+            _repair_incident_alert_foreign_key(connection)
+            _repair_risk_score_incident_foreign_key(connection)
 
             incident_columns = {
                 row["name"] for row in connection.execute("PRAGMA table_info(incidents)")

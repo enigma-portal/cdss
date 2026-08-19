@@ -22,7 +22,8 @@ class ParsedAlert:
     def as_database_record(self):
         """Return names matching the columns in the alerts database table."""
         record = asdict(self)
-        record["mitre_id"] = record.pop("mitre_ids")[0] if self.mitre_ids else None
+        mitre_ids = record.pop("mitre_ids")
+        record["mitre_id"] = mitre_ids[0] if mitre_ids else None
         return record
 
 

@@ -24,6 +24,13 @@ SAMPLE_ALERT = {
 
 
 class AlertPipelineTests(unittest.TestCase):
+    def test_database_record_without_mitre_has_schema_column(self):
+        alert = dict(SAMPLE_ALERT)
+        alert["rule"] = {"id": "510", "level": 3, "description": "System event"}
+        record = parse_alert(alert).as_database_record()
+        self.assertNotIn("mitre_ids", record)
+        self.assertIsNone(record["mitre_id"])
+
     def test_collects_from_read_only_indexer_client(self):
         class Client:
             def fetch_alerts(self, size, since):
