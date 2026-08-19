@@ -11,6 +11,7 @@ data/*.db-shm
 
 # Flask/editor environment files
 .env
+.env.txt
 .flaskenv
 .vscode/
 .idea/
