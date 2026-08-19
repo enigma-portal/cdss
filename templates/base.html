@@ -12,7 +12,7 @@
 <body>
   <header class="topbar"><div class="shell topbar-inner">
     <a class="brand" href="{{ url_for('dashboard.index') if current_user else url_for('auth.login') }}"><span class="brand-mark">C</span><span><strong>CDSS</strong><small>Incident Decision Support</small></span></a>
-    {% if current_user %}<nav class="primary-nav"><a href="{{ url_for('dashboard.index') }}">Incidents</a>{% if current_user.role == 'admin' %}<a href="{{ url_for('auth.users') }}">User management</a>{% endif %}</nav>
+    {% if current_user %}<nav class="primary-nav"><a href="{{ url_for('dashboard.index') }}">Overview</a><a href="{{ url_for('dashboard.incidents') }}">Incidents</a>{% if current_user.role == 'admin' %}<a href="{{ url_for('auth.users') }}">User management</a>{% endif %}</nav>
     <details class="account-menu"><summary><span class="avatar">{{ current_user.username[0]|upper }}</span><span class="account-label"><strong>{{ current_user.username }}</strong><small>{{ current_user.role|title }}</small></span><span class="chevron">⌄</span></summary><div class="account-dropdown"><a href="{{ url_for('auth.profile') }}">Profile settings</a>{% if current_user.role == 'admin' %}<a href="{{ url_for('auth.users') }}">Manage users</a>{% endif %}<form method="post" action="{{ url_for('auth.logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Log out</button></form></div></details>{% endif %}
   </div></header>
   {% if current_user %}<div class="statusbar"><div class="shell"><span class="pulse"></span> Realtime Wazuh monitoring <b>active</b><span class="status-note">Refreshes every 30 seconds</span></div></div>{% endif %}

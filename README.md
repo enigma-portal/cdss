@@ -43,8 +43,10 @@ the setup page; later visits use the login page. Every user can securely update
 their username or password from Profile settings. Administrators can create,
 rename, reset, enable, disable, and assign roles to local accounts. The compact
 account dropdown and navy/black/orange responsive dashboard keep these controls
-separate from incident investigation. The dashboard
-shows searchable, paginated history. Every incident opens into a detail view
+separate from incident investigation. The analyst overview groups repeated
+high/critical findings and summarizes 24-hour posture, endpoint exposure,
+severity mix, and attack signals. Full searchable, paginated history lives on
+the separate Incidents page. Every incident opens into a detail view
 with scoring evidence and persisted defensive actions. Known ATT&CK techniques
 use reviewed MITRE D3FEND countermeasures connected to NIST and CIS controls;
 other events use labelled NIST SP 800-61, NIST CSF, and CIS Controls v8

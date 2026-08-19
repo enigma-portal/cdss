@@ -71,9 +71,79 @@ def _dashboard_data():
         connection.close()
 
 
+def _overview_data():
+    """Return compact, alert-derived SOC metrics without inventing coverage."""
+    connection = get_db_connection()
+    try:
+        # Wazuh emits offsets such as ``-0400`` which SQLite does not parse.
+        # The first 19 characters are stable ISO local time and are sufficient
+        # for this lab's rolling analyst view.
+        window = "datetime(substr(incidents.detected_at, 1, 19)) >= datetime('now', '-24 hours')"
+        metrics = dict(connection.execute(f"""
+            SELECT COUNT(*) AS findings,
+                   COALESCE(SUM(incidents.severity_label IN ('critical', 'high')), 0) AS actionable,
+                   COALESCE(SUM(incidents.severity_label = 'critical'), 0) AS critical,
+                   COUNT(DISTINCT NULLIF(alerts.agent_name, '')) AS assets,
+                   COALESCE(AVG(risk_scores.final_risk_score), 0) AS average_risk
+            FROM incidents JOIN alerts ON alerts.id = incidents.alert_id
+            LEFT JOIN risk_scores ON risk_scores.incident_id = incidents.id
+            WHERE {window}
+        """).fetchone())
+        metrics["posture_score"] = max(0, min(100, round(100 - metrics["average_risk"] * 10)))
+
+        severity = [dict(row) for row in connection.execute(f"""
+            SELECT incidents.severity_label AS label, COUNT(*) AS total
+            FROM incidents WHERE {window}
+            GROUP BY incidents.severity_label
+        """)]
+        assets = [dict(row) for row in connection.execute(f"""
+            SELECT COALESCE(NULLIF(alerts.agent_name, ''), 'Unknown endpoint') AS name,
+                   COALESCE(NULLIF(alerts.agent_ip, ''), 'IP not reported') AS ip,
+                   COUNT(*) AS findings,
+                   SUM(incidents.severity_label IN ('critical', 'high')) AS actionable,
+                   MAX(COALESCE(risk_scores.final_risk_score, 0)) AS peak_risk,
+                   MAX(incidents.detected_at) AS last_seen
+            FROM incidents JOIN alerts ON alerts.id = incidents.alert_id
+            LEFT JOIN risk_scores ON risk_scores.incident_id = incidents.id
+            WHERE {window}
+            GROUP BY alerts.agent_name, alerts.agent_ip
+            ORDER BY actionable DESC, peak_risk DESC LIMIT 6
+        """)]
+        attacks = [dict(row) for row in connection.execute(f"""
+            SELECT incidents.technique_id, COALESCE(mitre_techniques.technique_name, incidents.title) AS name,
+                   COUNT(*) AS total, MAX(incidents.severity_label) AS severity
+            FROM incidents
+            LEFT JOIN mitre_techniques ON mitre_techniques.technique_id = incidents.technique_id
+            WHERE {window} AND incidents.severity_label IN ('critical', 'high')
+            GROUP BY incidents.technique_id, name ORDER BY total DESC LIMIT 5
+        """)]
+        queue = [dict(row) for row in connection.execute(f"""
+            SELECT MAX(incidents.id) AS id, incidents.title, incidents.severity_label,
+                   incidents.priority, alerts.rule_id, alerts.agent_name,
+                   COUNT(*) AS occurrences, MAX(incidents.detected_at) AS detected_at,
+                   MAX(COALESCE(risk_scores.final_risk_score, 0)) AS risk
+            FROM incidents JOIN alerts ON alerts.id = incidents.alert_id
+            LEFT JOIN risk_scores ON risk_scores.incident_id = incidents.id
+            WHERE {window} AND incidents.severity_label IN ('critical', 'high')
+            GROUP BY alerts.rule_id, alerts.agent_name
+            ORDER BY risk DESC, occurrences DESC LIMIT 6
+        """)]
+        return metrics, severity, assets, attacks, queue
+    finally:
+        connection.close()
+
+
 @dashboard.route("/")
 @login_required
 def index():
+    metrics, severity, assets, attacks, queue = _overview_data()
+    return render_template("overview.html", metrics=metrics, severity=severity,
+                           assets=assets, attacks=attacks, queue=queue)
+
+
+@dashboard.route("/incidents")
+@login_required
+def incidents():
     totals, incidents, pagination = _dashboard_data()
     return render_template("dashboard.html", totals=totals, incidents=incidents,
                            pagination=pagination)

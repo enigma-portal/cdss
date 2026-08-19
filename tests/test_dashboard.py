@@ -34,12 +34,16 @@ class DashboardTests(unittest.TestCase):
     def test_dashboard_loads(self):
         response = self.authenticated_client().get("/")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Security incidents", response.data)
+        self.assertIn(b"Infrastructure overview", response.data)
+        self.assertIn(b"Vulnerability coverage", response.data)
+        incidents = self.authenticated_client().get("/incidents")
+        self.assertEqual(incidents.status_code, 200)
+        self.assertIn(b"Security incidents", incidents.data)
         self.assertEqual(response.headers["X-Frame-Options"], "DENY")
 
     def test_dashboard_limits_invalid_filter_and_has_detail_route(self):
         client = self.authenticated_client()
-        response = client.get("/?severity=invalid&page=not-a-number&q=" + "x" * 500)
+        response = client.get("/incidents?severity=invalid&page=not-a-number&q=" + "x" * 500)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(client.get("/incidents/999999").status_code, 404)
 

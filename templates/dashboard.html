@@ -12,7 +12,7 @@
     <div><p class="eyebrow">DECISION QUEUE</p><h2>Security incidents</h2></div>
     <p>{{ pagination.total }} matching</p>
   </div>
-  <form class="filters" method="get" action="{{ url_for('dashboard.index') }}">
+  <form class="filters" method="get" action="{{ url_for('dashboard.incidents') }}">
     <label>Search<input name="q" value="{{ pagination.q }}" maxlength="100" placeholder="Rule, agent, source IP…"></label>
     <label>Severity<select name="severity">
       <option value="">All severities</option>
@@ -21,7 +21,7 @@
       {% endfor %}
     </select></label>
     <button type="submit">Apply filters</button>
-    {% if pagination.q or pagination.severity %}<a class="clear" href="{{ url_for('dashboard.index') }}">Clear</a>{% endif %}
+    {% if pagination.q or pagination.severity %}<a class="clear" href="{{ url_for('dashboard.incidents') }}">Clear</a>{% endif %}
   </form>
 
   {% if incidents %}<div class="table-wrap"><table>
@@ -35,9 +35,9 @@
     </tr>{% endfor %}</tbody>
   </table></div>
   <nav class="pagination" aria-label="Incident pages">
-    {% if pagination.page > 1 %}<a href="{{ url_for('dashboard.index', page=pagination.page-1, q=pagination.q, severity=pagination.severity) }}">← Previous</a>{% endif %}
+    {% if pagination.page > 1 %}<a href="{{ url_for('dashboard.incidents', page=pagination.page-1, q=pagination.q, severity=pagination.severity) }}">← Previous</a>{% endif %}
     <span>Page {{ pagination.page }} of {{ pagination.pages }}</span>
-    {% if pagination.page < pagination.pages %}<a href="{{ url_for('dashboard.index', page=pagination.page+1, q=pagination.q, severity=pagination.severity) }}">Next →</a>{% endif %}
+    {% if pagination.page < pagination.pages %}<a href="{{ url_for('dashboard.incidents', page=pagination.page+1, q=pagination.q, severity=pagination.severity) }}">Next →</a>{% endif %}
   </nav>
   {% else %}<div class="empty-state"><h3>No matching incidents</h3><p>Change the filters or wait for realtime Wazuh polling.</p></div>{% endif %}
 </section>
