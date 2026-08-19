@@ -8,3 +8,10 @@ details { border-top: 1px solid var(--line); padding-top: .75rem; }
 summary { color: var(--blue); cursor: pointer; font-weight: 700; }
 details p, details small { color: var(--muted); }
 abbr { color: var(--blue); cursor: help; text-decoration: underline dotted; }
+.help { display: inline-block; font-size: .78rem; line-height: 1; margin-left: .2rem; }
+.recommendation-intro { color: var(--muted); padding: 1rem 1.4rem 0; margin: 0; }
+.recommendations li > div { flex: 1; }
+.recommendations li strong { display: block; margin-top: .3rem; }
+.phase { display: inline-block; color: var(--blue); background: #eaf3ff; border-radius: 999px; padding: .15rem .45rem; font-size: .7rem; font-weight: 800; text-transform: uppercase; }
+.plain-why { color: var(--muted); margin: .4rem 0; }
+.recommendations details { border: 0; padding: 0; font-size: .8rem; }

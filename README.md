@@ -38,7 +38,9 @@ python -m app.services.ingest --size 500 --order desc
 python run.py
 ```
 
-Open the local port configured by `CDSS_PORT` (default `5001`). The dashboard
+Open `http://127.0.0.1:5000`. On first run, create the administrator through
+the setup page; later visits use the login page. Administrators can create,
+enable, and disable local analyst/admin accounts. The dashboard
 shows searchable, paginated history. Every incident opens into a detail view
 with scoring evidence and persisted defensive actions. Known ATT&CK techniques
 use reviewed MITRE D3FEND countermeasures connected to NIST and CIS controls;
@@ -61,3 +63,5 @@ python -m app.mitre.taxii_sync
 - Controlled attacks must only be performed against authorized lab systems.
 - The app binds to loopback only, uses security headers, limits filter input,
   parameterizes database queries, and never displays or logs Indexer credentials.
+- Passwords use scrypt hashing; state-changing forms use CSRF protection;
+  sessions are HttpOnly/SameSite and role checks protect user administration.

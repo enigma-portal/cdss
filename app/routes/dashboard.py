@@ -5,6 +5,7 @@ from math import ceil
 from flask import Blueprint, abort, render_template, request
 
 from app.database import get_db_connection
+from app.auth import login_required
 from app.services.recommendation_engine import get_incident_recommendations
 
 dashboard = Blueprint("dashboard", __name__)
@@ -71,6 +72,7 @@ def _dashboard_data():
 
 
 @dashboard.route("/")
+@login_required
 def index():
     totals, incidents, pagination = _dashboard_data()
     return render_template("dashboard.html", totals=totals, incidents=incidents,
@@ -78,6 +80,7 @@ def index():
 
 
 @dashboard.route("/incidents/<int:incident_id>")
+@login_required
 def incident_detail(incident_id):
     connection = get_db_connection()
     try:

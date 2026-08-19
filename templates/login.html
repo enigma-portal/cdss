@@ -1,0 +1,2 @@
+{% extends "base.html" %}
+{% block content %}<section class="auth-card panel"><p class="eyebrow">AUTHORIZED ACCESS</p><h2>Sign in to CDSS</h2><p>Use your administrator or analyst account.</p><form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>Username<input name="username" required maxlength="32" autocomplete="username" autofocus></label><label>Password<input type="password" name="password" required autocomplete="current-password"></label><button type="submit">Sign in</button></form></section>{% endblock %}

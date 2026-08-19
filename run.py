@@ -1,9 +1,13 @@
 import os
+import secrets
+from pathlib import Path
 
 from flask import Flask
 from app.database import initialize_database
 from app.database.seed import seed_knowledge_base
 from app.environment import load_local_environment
+from app.auth import init_auth
+from app.routes.auth import auth
 from app.routes.dashboard import dashboard
 from app.services.poller import start_realtime_poller
 from app.services.recommendation_engine import backfill_recommendations
@@ -12,6 +16,20 @@ from config import PROJECT_TITLE
 load_local_environment()
 app = Flask(__name__)
 app.config["PROJECT_TITLE"] = PROJECT_TITLE
+secret_file = Path(__file__).resolve().parent / "data" / "session.key"
+secret_file.parent.mkdir(parents=True, exist_ok=True)
+if not secret_file.exists():
+    secret_file.write_text(secrets.token_hex(32), encoding="ascii")
+app.config.update(
+    SECRET_KEY=secret_file.read_text(encoding="ascii").strip(),
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Strict",
+    SESSION_COOKIE_SECURE=False,
+    PERMANENT_SESSION_LIFETIME=3600,
+    MAX_CONTENT_LENGTH=64 * 1024,
+)
+init_auth(app)
+app.register_blueprint(auth)
 app.register_blueprint(dashboard)
 
 # Make sure the local SQLite database is ready whenever the app starts.
@@ -41,5 +59,4 @@ def secure_headers(response):
 
 if __name__ == "__main__":
     start_realtime_poller()
-    port = max(1024, min(int(os.getenv("CDSS_PORT", "5001")), 65535))
-    app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False)
+    app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False)

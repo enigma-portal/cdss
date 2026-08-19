@@ -22,7 +22,7 @@ def _curated_mitre(connection, technique_id, risk_score):
         "control_reference": " / ".join(filter(None, [
             row["d3fend_technique"], row["nist_ir_guidance"], row["cis_control"],
         ])),
-        "rationale": f"Curated defensive mapping for ATT&CK {technique_id}.",
+        "rationale": f"This action addresses the behavior described by ATT&CK {technique_id}.",
     } for row in rows]
 
 
@@ -102,9 +102,9 @@ def generate_recommendations(
             item["rationale"] += f" Scope: {scope}."
         return recommendations
     fallback_reason = (
-        "Verification-first guidance because successful activity is not malicious proof."
+        "A successful login can be normal, so verify it before taking disruptive action."
         if routine_success else
-        "Context-based fallback because no curated ATT&CK mapping was present."
+        "Wazuh did not provide a supported ATT&CK mapping, so this action uses the alert context and defensive standards."
     )
     return [{
         "action_text": action, "response_phase": phase, "priority": priority,

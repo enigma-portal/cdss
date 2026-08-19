@@ -8,6 +8,7 @@ data/*.db
 data/*.db-journal
 data/*.db-wal
 data/*.db-shm
+data/*.key
 
 # Flask/editor environment files
 .env

@@ -3,20 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="30">
+  {% if current_user %}<meta http-equiv="refresh" content="30">{% endif %}
   <title>{{ config.PROJECT_TITLE }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/detail.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css') }}">
 </head>
 <body>
   <header>
     <div class="container">
-      <p class="eyebrow">WAZUH SIEM · MITRE ATT&CK</p>
-      <h1>{{ config.PROJECT_TITLE }}</h1>
-      <p class="live"><span></span> Live monitoring · refreshes every 30 seconds</p>
+      <div class="header-row"><div><p class="eyebrow">WAZUH SIEM · MITRE ATT&CK</p><h1>{{ config.PROJECT_TITLE }}</h1></div>
+      {% if current_user %}<nav class="user-nav"><a href="{{ url_for('dashboard.index') }}">Incidents</a>{% if current_user.role == 'admin' %}<a href="{{ url_for('auth.users') }}">Users</a>{% endif %}<span>{{ current_user.username }} · {{ current_user.role }}</span><form method="post" action="{{ url_for('auth.logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Log out</button></form></nav>{% endif %}</div>
+      {% if current_user %}<p class="live"><span></span> Live monitoring · refreshes every 30 seconds</p>{% endif %}
     </div>
   </header>
   <main class="container">
+    {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="flash {{ category }}" role="alert">{{ message }}</div>{% endfor %}{% endwith %}
     {% block content %}{% endblock %}
   </main>
 </body>
