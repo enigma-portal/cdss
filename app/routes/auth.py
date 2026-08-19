@@ -2,13 +2,14 @@
 
 import re
 import secrets
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
 from flask import Blueprint, flash, g, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from app.auth import admin_required, validate_csrf
+from app.auth import admin_required, login_required, validate_csrf
 from app.database import get_db_connection
 
 auth = Blueprint("auth", __name__)
@@ -115,6 +116,52 @@ def logout():
     return redirect(url_for("auth.login"))
 
 
+@auth.route("/profile", methods=("GET", "POST"))
+@login_required
+def profile():
+    connection = get_db_connection()
+    try:
+        user = connection.execute(
+            "SELECT id, username, password_hash, role, created_at, last_login_at FROM users WHERE id = ?",
+            (g.user["id"],),
+        ).fetchone()
+        if request.method == "POST":
+            validate_csrf()
+            action = request.form.get("action")
+            current_password = request.form.get("current_password", "")
+            if not check_password_hash(user["password_hash"], current_password):
+                flash("Current password is incorrect.", "error")
+            elif action == "username":
+                username = request.form.get("username", "").strip()
+                if not USERNAME_RE.fullmatch(username):
+                    flash("Username must be 3–32 valid characters.", "error")
+                else:
+                    try:
+                        with connection:
+                            connection.execute("UPDATE users SET username = ? WHERE id = ?",
+                                               (username, user["id"]))
+                        flash("Username updated.", "success")
+                        return redirect(url_for("auth.profile"))
+                    except sqlite3.IntegrityError:
+                        flash("That username already exists.", "error")
+            elif action == "password":
+                password = request.form.get("password", "")
+                confirmation = request.form.get("confirmation", "")
+                if password != confirmation:
+                    flash("New passwords do not match.", "error")
+                elif not _valid_password(password):
+                    flash("New password needs 12+ characters, upper/lower-case, and a number.", "error")
+                else:
+                    with connection:
+                        connection.execute("UPDATE users SET password_hash = ? WHERE id = ?",
+                                           (generate_password_hash(password, method="scrypt"), user["id"]))
+                    flash("Password updated.", "success")
+                    return redirect(url_for("auth.profile"))
+        return render_template("profile.html", profile_user=user)
+    finally:
+        connection.close()
+
+
 @auth.route("/admin/users", methods=("GET", "POST"))
 @admin_required
 def users():
@@ -137,9 +184,7 @@ def users():
                             (username, generate_password_hash(password, method="scrypt"), role),
                         )
                     flash("User account created.", "success")
-                except Exception as error:
-                    if "UNIQUE constraint" not in str(error):
-                        raise
+                except sqlite3.IntegrityError:
                     flash("That username already exists.", "error")
         rows = connection.execute(
             "SELECT id, username, role, is_active, created_at, last_login_at FROM users ORDER BY username"
@@ -166,3 +211,45 @@ def toggle_user(user_id):
         finally:
             connection.close()
     return redirect(url_for("auth.users"))
+
+
+@auth.route("/admin/users/<int:user_id>/edit", methods=("GET", "POST"))
+@admin_required
+def edit_user(user_id):
+    connection = get_db_connection()
+    try:
+        user = connection.execute(
+            "SELECT id, username, role, is_active, created_at FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+        if not user:
+            return redirect(url_for("auth.users"))
+        if request.method == "POST":
+            validate_csrf()
+            username = request.form.get("username", "").strip()
+            role = request.form.get("role", "analyst")
+            password = request.form.get("password", "")
+            error = None
+            if not USERNAME_RE.fullmatch(username) or role not in {"admin", "analyst"}:
+                error = "Invalid username or role."
+            elif user_id == g.user["id"] and role != "admin":
+                error = "You cannot remove your own administrator role."
+            elif password and not _valid_password(password):
+                error = "Reset password needs 12+ characters, upper/lower-case, and a number."
+            if error:
+                flash(error, "error")
+            else:
+                try:
+                    with connection:
+                        connection.execute("UPDATE users SET username = ?, role = ? WHERE id = ?",
+                                           (username, role, user_id))
+                        if password:
+                            connection.execute("UPDATE users SET password_hash = ? WHERE id = ?",
+                                               (generate_password_hash(password, method="scrypt"), user_id))
+                    flash("Account updated.", "success")
+                    return redirect(url_for("auth.users"))
+                except sqlite3.IntegrityError:
+                    flash("That username already exists.", "error")
+        return render_template("edit_user.html", edit_user=user)
+    finally:
+        connection.close()

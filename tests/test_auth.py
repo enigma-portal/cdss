@@ -67,6 +67,46 @@ class AuthenticationTests(unittest.TestCase):
         connection.close()
         self.assertEqual(role, "analyst")
 
+    def test_user_changes_own_username_with_current_password(self):
+        self._create_admin()
+        self.client.get("/profile")
+        response = self.client.post("/profile", data={
+            "csrf_token": self._csrf(), "action": "username",
+            "username": "renamed-admin", "current_password": "StrongTesting123",
+        })
+        self.assertEqual(response.status_code, 302)
+        connection = get_db_connection()
+        exists = connection.execute(
+            "SELECT 1 FROM users WHERE username = ?", ("renamed-admin",)
+        ).fetchone()
+        connection.close()
+        self.assertIsNotNone(exists)
+
+    def test_admin_renames_user_and_resets_password(self):
+        self._create_admin()
+        self.client.get("/admin/users")
+        self.client.post("/admin/users", data={
+            "csrf_token": self._csrf(), "username": "soc-analyst",
+            "password": "AnalystSecure123", "role": "analyst",
+        })
+        connection = get_db_connection()
+        user_id = connection.execute(
+            "SELECT id FROM users WHERE username = ?", ("soc-analyst",)
+        ).fetchone()["id"]
+        connection.close()
+        self.client.get(f"/admin/users/{user_id}/edit")
+        response = self.client.post(f"/admin/users/{user_id}/edit", data={
+            "csrf_token": self._csrf(), "username": "tier1-analyst",
+            "role": "analyst", "password": "ResetSecure456",
+        })
+        self.assertEqual(response.status_code, 302)
+        connection = get_db_connection()
+        renamed = connection.execute(
+            "SELECT username FROM users WHERE id = ?", (user_id,)
+        ).fetchone()["username"]
+        connection.close()
+        self.assertEqual(renamed, "tier1-analyst")
+
 
 if __name__ == "__main__":
     unittest.main()

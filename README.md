@@ -39,8 +39,11 @@ python run.py
 ```
 
 Open `http://127.0.0.1:5000`. On first run, create the administrator through
-the setup page; later visits use the login page. Administrators can create,
-enable, and disable local analyst/admin accounts. The dashboard
+the setup page; later visits use the login page. Every user can securely update
+their username or password from Profile settings. Administrators can create,
+rename, reset, enable, disable, and assign roles to local accounts. The compact
+account dropdown and navy/black/orange responsive dashboard keep these controls
+separate from incident investigation. The dashboard
 shows searchable, paginated history. Every incident opens into a detail view
 with scoring evidence and persisted defensive actions. Known ATT&CK techniques
 use reviewed MITRE D3FEND countermeasures connected to NIST and CIS controls;
