@@ -1,0 +1,234 @@
+CDSS PROJECT STATUS AND NEXT WORK
+Updated: 21 August 2026
+
+============================================================
+1. PROJECT OBJECTIVE
+============================================================
+Build a secure, explainable Cybersecurity Decision Support System that receives
+events from one or more SIEM platforms, reduces noise, prioritizes genuine
+security findings, and gives analysts clear response recommendations.
+
+============================================================
+2. WORK COMPLETED
+============================================================
+[DONE] Read-only SIEM/Wazuh Indexer alert collection.
+[DONE] Realtime polling and duplicate alert protection.
+[DONE] Historical alert import and searchable incident history.
+[DONE] Explainable CDSS risk score and P1-P4 priority.
+[DONE] Routine successful-login false-positive reduction.
+[DONE] MITRE ATT&CK, MITRE D3FEND, NIST and CIS recommendations.
+[DONE] Recommendations for events without a MITRE technique ID.
+[DONE] Incident detail page with asset/network context.
+[DONE] Dark navy, black and orange responsive interface.
+[DONE] Separate analyst overview and full Incidents page.
+[DONE] Dashboard cards, priority queue, severity bars, assets and attack signals
+       are clickable and lead to filtered evidence.
+[DONE] Repeated high/critical activity is grouped on the dashboard.
+[DONE] User login/logout, secure password hashing and CSRF protection.
+[DONE] User profile with username/password change.
+[DONE] Admin user creation, rename, password reset, role and account status.
+[DONE] Application restricted to port 5000 for local testing.
+[DONE] Single-instance lock prevents stale CDSS builds sharing port 5000.
+[DONE] GitHub main branch updated through commit c0aa06a.
+[DONE] Automated suite passing: 29 tests.
+[DONE] Phase 1 filters, help tooltips and direct page navigation.
+[DONE] Phase 2 session timeout, themes and admin settings foundation.
+
+============================================================
+3. TOMORROW - REQUIRED WORK (PRIORITY ORDER)
+============================================================
+
+P0 - Correct dashboard filtering
+--------------------------------
+[DONE] Clicking Critical displays critical incidents only.
+[DONE] Clicking High displays high incidents only.
+[DONE] Clicking Actionable displays only High + Critical incidents.
+[DONE] Selected filters are preserved while moving between pages.
+[DONE] Page heading/filter badge clearly states the active filter.
+[DONE] Automated tests prove lower severity cannot leak into Critical/Actionable.
+
+P0 - Definitions and help tooltips
+----------------------------------
+[DONE] Added a small help icon beside every dashboard metric/panel title.
+[DONE] Hover, keyboard focus and mobile tap open a readable explanation box.
+[DONE] Defined:
+       - Observed posture
+       - Actionable findings
+       - Critical findings
+       - Observed assets
+       - Priority queue
+       - Severity mix
+       - Asset risk / peak risk
+       - Attack signals
+       - Vulnerability coverage
+[RULE] Tooltips must use simple analyst-friendly language.
+[RULE] Tooltips must work with mouse, keyboard and mobile tap.
+
+P0 - Direct page navigation
+---------------------------
+[DONE] Kept Previous and Next buttons.
+[DONE] Added a small "Go to page" number field and Go button.
+[DONE] Server validates/clamps invalid and huge page numbers.
+[DONE] Search, severity and actionable filters remain after page jump.
+[DONE] Nearby page numbers and first/last shortcuts are displayed.
+[DONE] Automated direct jump from page 1 to page 7 test.
+
+P1 - Configurable logout/session timeout
+----------------------------------------
+[DONE] Added an admin Security Settings page.
+[DONE] Admin can set inactivity timeout from 5 to 480 minutes.
+[DONE] Logged-in users receive a one-minute expiry warning.
+[DONE] Server expires inactive sessions and redirects to login.
+[DONE] Setting changes record the administrator ID and timestamp.
+[SECURITY] Do not rely only on a browser timer; enforce expiry server-side.
+[SECURITY] Force re-login after password reset or account disable.
+
+P1 - User-selectable colour scheme
+----------------------------------
+[DONE] Offered Navy/Black/Orange, High Contrast and Light themes.
+[DONE] Each user's preference is saved in their profile.
+[DONE] Admin can set the system default without exposing sensitive data.
+[DONE] Added readable contrast and visible keyboard-focus styling.
+
+P1 - Replace product-specific Wazuh wording with SIEM terminology
+----------------------------------------------------------------
+[IN PROGRESS] User-facing labels are being changed to SIEM; remaining legacy screens need audit.
+[DONE] Kept Wazuh as one connector type internally behind a generic adapter.
+[TODO] Rename UI text carefully while preserving current database/history.
+[DONE] Defined a generic SIEM connector interface and connector registry.
+[NOTE] Technical connector logs may identify Wazuh because analysts need to know
+       which source produced an event.
+
+P1 - Admin SIEM Connections page
+--------------------------------
+[DONE] Admin can add, edit, replace password, enable, disable, test and confirmed-delete a SIEM connection.
+[DONE] Initial connector type: Wazuh Indexer / OpenSearch.
+[DONE] Provisioned and verified least-privilege Wazuh account cdss_reader.
+[DONE] Fields: friendly name, URL/IP, port, index pattern, username, password,
+       TLS verification, certificate option and connection status.
+[DONE] Saved passwords are never displayed; separate Replace Password flow is available.
+[DONE] Connector secrets are encrypted at rest using Fernet and a git-ignored local key.
+[DONE] Test Connection is read-only and required before enabling collection.
+[DONE] Shows SIEM health: connected/disconnected, last successful poll, last error,
+       response time, cluster health and last received alert.
+[TODO] Show network health separately from authentication/index errors.
+[DONE] Safe Disconnect/Disable action preserves stored history.
+[TODO] Add an optional historical import with From/To timestamps; never import
+       old SIEM data automatically when a connector is first enabled.
+[TODO] Add an admin-only Data Retention panel showing stored event count and size.
+[TODO] Admin can delete CDSS alert/incident history for a selected date range or
+       all history after typed confirmation; preserve users/settings/knowledge.
+[TODO] Show exactly what will be deleted and estimated recoverable space first.
+[SECURITY] Only admins can manage connections; all changes must be audited.
+[SECURITY] Use read-only SIEM accounts and allow-listed HTTPS endpoints.
+[SECURITY] Protect against SSRF: validate schemes, addresses and destination ports.
+
+P1 - Alert collection and noise-control policy
+----------------------------------------------
+[DONE] Admin can set polling interval and maximum batch size within safe limits.
+[DONE] Admin can select minimum source rule level to ingest.
+[TODO] Allow-list/deny-list rules, agents and event categories.
+[TODO] Exclude routine/known-benign events through reviewed suppression rules.
+[TODO] Group duplicate alerts into one case using rule + asset + time window.
+[TODO] Show occurrence count and first/last seen rather than flooding the queue.
+[TODO] Add suppression expiry so temporary exceptions do not remain forever.
+[TODO] Preview how many historical events a policy would include/exclude before save.
+[TODO] Preserve raw alerts for audit while creating incidents only when policy says so.
+[IMPORTANT] "Frequency" must mean two different settings in the UI:
+            1) Poll interval: how often CDSS checks the SIEM.
+            2) Correlation threshold: how many repeated events create/escalate a case.
+
+============================================================
+4. IMPORTANT DATA INTEGRATIONS STILL REQUIRED
+============================================================
+[TODO] Wazuh/SIEM vulnerability state index integration for real CVE totals.
+[TODO] Asset inventory: agent status, OS, IP, last seen and monitoring health.
+[TODO] Configuration assessment/misconfiguration findings.
+[TODO] File integrity, malware and authentication activity categories.
+[TODO] Store connector and ingestion health history for availability reporting.
+
+============================================================
+5. ARCHITECT RECOMMENDATIONS FOR AN EXCEPTIONAL PROTOTYPE
+============================================================
+
+Analyst workflow
+----------------
+[RECOMMEND] Incident states: New, Acknowledged, Investigating, Contained, Closed.
+[RECOMMEND] Assign incident to an analyst with ownership and timestamps.
+[RECOMMEND] Disposition: True Positive, Benign Positive, False Positive, Duplicate.
+[RECOMMEND] Analyst notes and evidence timeline.
+[RECOMMEND] Bulk acknowledge/close only with confirmation and audit records.
+[RECOMMEND] Track Mean Time to Acknowledge and Mean Time to Resolve.
+
+Risk and asset intelligence
+---------------------------
+[RECOMMEND] Asset criticality (Critical/High/Normal/Low) set by admins.
+[RECOMMEND] Increase priority when a risky event affects a critical asset.
+[RECOMMEND] Separate event severity, confidence and business impact.
+[RECOMMEND] Explain every priority change and keep the old score for audit.
+[RECOMMEND] Trend graphs for risk, incidents and vulnerabilities over time.
+
+Connector architecture
+----------------------
+[RECOMMEND] Use adapters: Wazuh today; Splunk, Elastic and Microsoft Sentinel later.
+[RECOMMEND] Normalize all source events into one vendor-neutral event schema.
+[RECOMMEND] Each connector declares health, capabilities and supported fields.
+[RECOMMEND] Use background workers with retry/backoff and a visible failure queue.
+[RECOMMEND] Never let one failed connector stop the dashboard or other connectors.
+
+Security and governance
+-----------------------
+[RECOMMEND] Audit log for logins, settings, connector changes and incident actions.
+[RECOMMEND] Role permissions beyond Admin/Analyst if needed: Viewer and Supervisor.
+[RECOMMEND] Rate limits, account lockout and secure password policy.
+[RECOMMEND] Backup/restore for database and encrypted settings.
+[RECOMMEND] Export an incident report in CSV/PDF without exposing credentials.
+[RECOMMEND] Data retention settings and safe archive/purge process.
+[RECOMMEND] Production deployment with a proper WSGI server and trusted TLS.
+
+Demonstration quality
+---------------------
+[RECOMMEND] Dashboard time selector: 1h, 24h, 7d and custom range.
+[RECOMMEND] Saved analyst filters and bookmarked investigations.
+[RECOMMEND] Empty/loading/error states that clearly explain what is happening.
+[RECOMMEND] Demo dataset mode clearly labelled as simulated data.
+[RECOMMEND] System status page showing CDSS, database and each SIEM connector.
+
+============================================================
+6. PROPOSED IMPLEMENTATION PHASES
+============================================================
+Phase 1: Fix filters, tooltips and direct page navigation.
+Phase 2: Session timeout, themes and admin settings foundation.
+Phase 3: [IN PROGRESS] Vendor-neutral SIEM connector architecture and secure connection UI.
+Phase 4: [IN PROGRESS] Health monitoring, polling policy, suppression and correlation.
+Phase 5: Vulnerability/asset integration and analyst case workflow.
+Phase 6: Audit logs, reports, accessibility, security review and final testing.
+
+============================================================
+7. DEFINITION OF DONE FOR EVERY CHANGE
+============================================================
+- Simple UI with no unexplained number or term.
+- Keyboard and mobile accessible.
+- Server-side validation and authorization.
+- No password/API secret displayed, logged or committed.
+- Automated tests added and all existing tests remain green.
+- Tested only on the approved local port 5000.
+- Git diff reviewed for secrets and unintended files.
+- Commit and GitHub push performed only after explicit approval.
+
+============================================================
+8. TODAY'S SHORT SUMMARY - 21 AUGUST 2026
+============================================================
+- Completed Phase 1 dashboard filters, help tooltips, interactivity and direct page jump.
+- Completed Phase 2 admin security settings, inactivity timeout, session controls and themes.
+- Started Phase 3/4 vendor-neutral SIEM connector architecture and administration UI.
+- Added secure encrypted connector credentials, create/edit/test/enable/disable/delete controls.
+- Added connector health, polling interval, batch size, minimum alert level and correlation controls.
+- Fixed misleading 100/100 posture: empty systems now show No data.
+- Added single-instance protection so CDSS uses only port 5000 without stale duplicate servers.
+- Created and verified least-privilege Wazuh user cdss_reader with read-only alert access.
+- Confirmed real credentials are not hard-coded or tracked by Git.
+- Current automated test baseline: 29 tests passing.
+- Remaining priority: finish Phase 3/4 workflows, then Phase 5 asset/vulnerability and analyst case features.
+
+END OF STATUS FILE

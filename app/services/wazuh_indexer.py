@@ -61,13 +61,28 @@ class WazuhIndexerClient:
             with urlopen(request, timeout=self.timeout_seconds, context=self.ssl_context) as response:
                 return json.loads(response.read().decode("utf-8"))
         except HTTPError as error:
+            if error.code == 401:
+                message = "Authentication failed (HTTP 401). Check the read-only username and password."
+            elif error.code == 403:
+                message = "Authorization failed (HTTP 403). The SIEM account lacks read permissions."
+            else:
+                message = f"SIEM API returned HTTP {error.code}."
             raise WazuhIndexerError(
-                f"Wazuh Indexer returned HTTP {error.code}. Check the CDSS read-only account."
+                message
             ) from error
-        except (URLError, TimeoutError, json.JSONDecodeError) as error:
+        except URLError as error:
+            if isinstance(error.reason, ssl.SSLCertVerificationError):
+                message = ("TLS certificate verification failed. For a lab self-signed certificate, "
+                           "turn off TLS verification; for production, install the trusted CA certificate.")
+            else:
+                message = "Network connection failed. Check SIEM address, port, firewall, and routing."
             raise WazuhIndexerError(
-                "Could not connect to the Wazuh Indexer API. Check the URL, TLS setting, and network access."
+                message
             ) from error
+        except TimeoutError as error:
+            raise WazuhIndexerError("SIEM connection timed out after 10 seconds.") from error
+        except json.JSONDecodeError as error:
+            raise WazuhIndexerError("SIEM returned an invalid non-JSON response.") from error
 
     def fetch_alerts(self, size=100, since=None, sort_order="desc"):
         """Return newest matching raw Wazuh alert documents.

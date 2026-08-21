@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-title"><div><p class="eyebrow">SIEM CONNECTION</p><h2>Edit {{ item.name }}</h2><p>Changing connection details disables collection until the next successful test.</p></div><a class="secondary" href="{{ url_for('auth.siem_connections') }}">Back to connections</a></div>
+<div class="settings-grid">
+<section class="panel setting-card"><h3>Connection details</h3><form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="details">
+<label>Friendly name<input name="name" required minlength="3" maxlength="64" value="{{ item.name }}"></label>
+<div class="form-pair"><label>HTTPS URL<input type="url" name="base_url" required value="{{ item.base_url }}"></label><label>Port<input type="number" name="port" min="1" max="65535" required value="{{ item.port }}"></label></div>
+<label>Index pattern<input name="index_pattern" required maxlength="128" value="{{ item.index_pattern }}"></label>
+<label>Read-only username<input name="username" required maxlength="128" value="{{ item.username }}" autocomplete="off"></label>
+<label class="check-label"><input type="checkbox" name="verify_tls" value="1"{% if item.verify_tls %} checked{% endif %}> Verify TLS certificate</label>
+<button type="submit">Save connection details</button></form></section>
+<section class="panel setting-card"><h3>Replace password</h3><p>The existing password is never displayed.</p><form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="password"><label>New password<input type="password" name="password" required autocomplete="new-password"></label><button type="submit">Replace password</button></form>
+<hr><h3>Delete connection</h3><p>Stored alerts and incidents will be preserved. Disconnect first, then type <strong>{{ item.name }}</strong>.</p><form method="post" action="{{ url_for('auth.delete_siem_connection', connection_id=item.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>Connection name confirmation<input name="confirm_name" required autocomplete="off"></label><button type="submit" class="danger-action">Delete connection</button></form></section>
+</div>
+{% endblock %}

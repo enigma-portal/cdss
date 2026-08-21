@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import tempfile
+import time
 import unittest
 
 import app.database as database
@@ -106,6 +107,48 @@ class AuthenticationTests(unittest.TestCase):
         ).fetchone()["username"]
         connection.close()
         self.assertEqual(renamed, "tier1-analyst")
+
+    def test_admin_updates_audited_security_settings(self):
+        self._create_admin()
+        self.client.get("/admin/security-settings")
+        response = self.client.post("/admin/security-settings", data={
+            "csrf_token": self._csrf(), "session_timeout_minutes": "30",
+            "default_theme": "high-contrast",
+        })
+        self.assertEqual(response.status_code, 302)
+        connection = get_db_connection()
+        row = connection.execute("SELECT setting_value, updated_by FROM system_settings WHERE setting_key = 'session_timeout_minutes'").fetchone()
+        connection.close()
+        self.assertEqual(row["setting_value"], "30")
+        self.assertIsNotNone(row["updated_by"])
+
+    def test_user_theme_is_saved_and_applied(self):
+        self._create_admin()
+        self.client.get("/profile")
+        response = self.client.post("/profile", data={
+            "csrf_token": self._csrf(), "action": "theme", "theme": "light",
+        })
+        self.assertEqual(response.status_code, 302)
+        page = self.client.get("/profile")
+        self.assertIn(b'class="theme-light"', page.data)
+
+    def test_inactive_session_expires_server_side(self):
+        self._create_admin()
+        with self.client.session_transaction() as session:
+            session["last_activity"] = int(time.time()) - 4000
+        response = self.client.get("/", follow_redirects=False)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login?expired=1", response.headers["Location"])
+
+    def test_auth_version_change_invalidates_existing_session(self):
+        self._create_admin()
+        connection = get_db_connection()
+        with connection:
+            connection.execute("UPDATE users SET auth_version = auth_version + 1 WHERE username = 'admin-test'")
+        connection.close()
+        response = self.client.get("/", follow_redirects=False)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login", response.headers["Location"])
 
 
 if __name__ == "__main__":

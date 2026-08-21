@@ -2,20 +2,22 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  {% if current_user and request.endpoint == 'dashboard.index' %}<meta http-equiv="refresh" content="30">{% endif %}
+  {% if current_user and request.endpoint == 'dashboard.index' and siem_monitoring_active %}<meta http-equiv="refresh" content="30">{% endif %}
   <title>{{ config.PROJECT_TITLE }}</title>
+  <meta name="cdss-build" content="{{ config.APP_BUILD }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/detail.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
 </head>
-<body>
+<body class="theme-{{ effective_theme|default('navy') }}"{% if current_user %} data-session-timeout="{{ session_timeout_seconds }}"{% endif %}>
   <header class="topbar"><div class="shell topbar-inner">
     <a class="brand" href="{{ url_for('dashboard.index') if current_user else url_for('auth.login') }}"><span class="brand-mark">C</span><span><strong>CDSS</strong><small>Incident Decision Support</small></span></a>
-    {% if current_user %}<nav class="primary-nav"><a href="{{ url_for('dashboard.index') }}">Overview</a><a href="{{ url_for('dashboard.incidents') }}">Incidents</a>{% if current_user.role == 'admin' %}<a href="{{ url_for('auth.users') }}">User management</a>{% endif %}</nav>
-    <details class="account-menu"><summary><span class="avatar">{{ current_user.username[0]|upper }}</span><span class="account-label"><strong>{{ current_user.username }}</strong><small>{{ current_user.role|title }}</small></span><span class="chevron">⌄</span></summary><div class="account-dropdown"><a href="{{ url_for('auth.profile') }}">Profile settings</a>{% if current_user.role == 'admin' %}<a href="{{ url_for('auth.users') }}">Manage users</a>{% endif %}<form method="post" action="{{ url_for('auth.logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Log out</button></form></div></details>{% endif %}
+    {% if current_user %}<nav class="primary-nav"><a href="{{ url_for('dashboard.index') }}">Overview</a><a href="{{ url_for('dashboard.incidents') }}">Incidents</a>{% if current_user.role == 'admin' %}<a href="{{ url_for('auth.users') }}">User management</a><a href="{{ url_for('auth.security_settings') }}">Settings</a><a href="{{ url_for('auth.siem_connections') }}">SIEM</a>{% endif %}</nav>
+    <details class="account-menu"><summary><span class="avatar">{{ current_user.username[0]|upper }}</span><span class="account-label"><strong>{{ current_user.username }}</strong><small>{{ current_user.role|title }}</small></span><span class="chevron">⌄</span></summary><div class="account-dropdown"><a href="{{ url_for('auth.profile') }}">Profile settings</a>{% if current_user.role == 'admin' %}<a href="{{ url_for('auth.users') }}">Manage users</a><a href="{{ url_for('auth.security_settings') }}">Security settings</a><a href="{{ url_for('auth.siem_connections') }}">SIEM connections</a>{% endif %}<form method="post" action="{{ url_for('auth.logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Log out</button></form></div></details>{% endif %}
   </div></header>
-  {% if current_user %}<div class="statusbar"><div class="shell"><span class="pulse"></span> Realtime Wazuh monitoring <b>active</b><span class="status-note">Refreshes every 30 seconds</span></div></div>{% endif %}
+  {% if current_user %}<div class="statusbar"><div class="shell">{% if siem_monitoring_active %}<span class="pulse"></span> Realtime SIEM monitoring <b>active</b><span class="status-note">Configured polling policy applies</span>{% else %}<span class="pulse paused"></span> SIEM monitoring <b class="paused-text">paused</b><span class="status-note">No enabled SIEM connection; no new alerts are collected{% if current_user.role == 'admin' %} · <a href="{{ url_for('auth.siem_connections') }}">Configure SIEM →</a>{% endif %}</span>{% endif %}</div></div>{% endif %}
   <main class="shell page-content">{% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="flash {{ category }}" role="alert">{{ message }}</div>{% endfor %}{% endwith %}{% block content %}{% endblock %}</main>
+  {% if current_user %}<div id="session-warning" class="session-warning" role="alert" hidden>Your session will expire in <strong id="session-countdown">60</strong> seconds because of inactivity.</div><script src="{{ url_for('static', filename='js/session.js') }}" defer></script>{% endif %}
 </body>
 </html>

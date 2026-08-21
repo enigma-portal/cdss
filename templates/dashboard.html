@@ -10,7 +10,7 @@
 <section class="panel">
   <div class="panel-heading">
     <div><p class="eyebrow">DECISION QUEUE</p><h2>Security incidents</h2></div>
-    <p>{{ pagination.total }} matching</p>
+    <div class="filter-state"><span>{{ pagination.active_label }}</span><p>{{ pagination.total }} matching</p></div>
   </div>
   <form class="filters" method="get" action="{{ url_for('dashboard.incidents') }}">
     <label>Search<input name="q" value="{{ pagination.q }}" maxlength="100" placeholder="Rule, agent, source IP…"></label>
@@ -21,7 +21,8 @@
       {% endfor %}
     </select></label>
     <button type="submit">Apply filters</button>
-    {% if pagination.q or pagination.severity %}<a class="clear" href="{{ url_for('dashboard.incidents') }}">Clear</a>{% endif %}
+    {% if pagination.q or pagination.severity or pagination.view %}<a class="clear" href="{{ url_for('dashboard.incidents') }}">Clear</a>{% endif %}
+    {% if pagination.view %}<input type="hidden" name="view" value="{{ pagination.view }}">{% endif %}
   </form>
 
   {% if incidents %}<div class="table-wrap"><table>
@@ -36,9 +37,12 @@
   </table></div>
   <nav class="pagination" aria-label="Incident pages">
     {% if pagination.page > 1 %}<a href="{{ url_for('dashboard.incidents', page=pagination.page-1, q=pagination.q, severity=pagination.severity, view=pagination.view) }}">← Previous</a>{% endif %}
-    <span>Page {{ pagination.page }} of {{ pagination.pages }}</span>
+    {% if pagination.page_numbers[0] > 1 %}<a href="{{ url_for('dashboard.incidents', page=1, q=pagination.q, severity=pagination.severity, view=pagination.view) }}">1</a>{% if pagination.page_numbers[0] > 2 %}<span>…</span>{% endif %}{% endif %}
+    {% for number in pagination.page_numbers %}{% if number == pagination.page %}<span class="current-page" aria-current="page">{{ number }}</span>{% else %}<a href="{{ url_for('dashboard.incidents', page=number, q=pagination.q, severity=pagination.severity, view=pagination.view) }}">{{ number }}</a>{% endif %}{% endfor %}
+    {% if pagination.page_numbers[-1] < pagination.pages %}{% if pagination.page_numbers[-1] < pagination.pages - 1 %}<span>…</span>{% endif %}<a href="{{ url_for('dashboard.incidents', page=pagination.pages, q=pagination.q, severity=pagination.severity, view=pagination.view) }}">{{ pagination.pages }}</a>{% endif %}
     {% if pagination.page < pagination.pages %}<a href="{{ url_for('dashboard.incidents', page=pagination.page+1, q=pagination.q, severity=pagination.severity, view=pagination.view) }}">Next →</a>{% endif %}
+    <form class="page-jump" method="get" action="{{ url_for('dashboard.incidents') }}"><label for="page-jump">Go to page</label><input id="page-jump" name="page" type="number" min="1" max="{{ pagination.pages }}" value="{{ pagination.page }}" required><input type="hidden" name="q" value="{{ pagination.q }}"><input type="hidden" name="severity" value="{{ pagination.severity }}"><input type="hidden" name="view" value="{{ pagination.view }}"><button type="submit">Go</button></form>
   </nav>
-  {% else %}<div class="empty-state"><h3>No matching incidents</h3><p>Change the filters or wait for realtime Wazuh polling.</p></div>{% endif %}
+  {% else %}<div class="empty-state"><h3>No matching incidents</h3><p>Change the filters or wait for the SIEM connector to collect new events.</p></div>{% endif %}
 </section>
 {% endblock %}

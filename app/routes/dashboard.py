@@ -55,6 +55,8 @@ def _dashboard_data():
             "SELECT COUNT(*) FROM incidents JOIN alerts ON alerts.id = incidents.alert_id" + where,
             parameters,
         ).fetchone()[0]
+        pages = max(1, ceil(filtered_total / PAGE_SIZE))
+        page = min(page, pages)
         incidents = connection.execute("""
             SELECT incidents.id, incidents.title, incidents.status,
                    incidents.severity_label, incidents.detected_at,
@@ -67,8 +69,14 @@ def _dashboard_data():
             [*parameters, PAGE_SIZE, (page - 1) * PAGE_SIZE],
         ).fetchall()
         return dict(totals), [dict(row) for row in incidents], {
-            "page": page, "pages": max(1, ceil(filtered_total / PAGE_SIZE)),
+            "page": page, "pages": pages,
             "total": filtered_total, "q": search, "severity": severity, "view": view,
+            "page_numbers": list(range(max(1, page - 2), min(pages, page + 2) + 1)),
+            "active_label": (
+                f"{severity.title()} only" if severity else
+                "Actionable: High + Critical" if view == "actionable" else
+                "All incidents"
+            ),
         }
     finally:
         connection.close()
@@ -92,7 +100,10 @@ def _overview_data():
             LEFT JOIN risk_scores ON risk_scores.incident_id = incidents.id
             WHERE {window}
         """).fetchone())
-        metrics["posture_score"] = max(0, min(100, round(100 - metrics["average_risk"] * 10)))
+        metrics["posture_score"] = (
+            max(0, min(100, round(100 - metrics["average_risk"] * 10)))
+            if metrics["findings"] else None
+        )
 
         severity = [dict(row) for row in connection.execute(f"""
             SELECT incidents.severity_label AS label, COUNT(*) AS total

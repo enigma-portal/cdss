@@ -1,10 +1,12 @@
 """Tests for the Wazuh Indexer API client without a live Wazuh server."""
 
 import json
+import ssl
+from urllib.error import URLError
 from unittest.mock import MagicMock, patch
 import unittest
 
-from app.services.wazuh_indexer import WazuhIndexerClient
+from app.services.wazuh_indexer import WazuhIndexerClient, WazuhIndexerError
 
 
 class WazuhIndexerClientTests(unittest.TestCase):
@@ -24,6 +26,13 @@ class WazuhIndexerClientTests(unittest.TestCase):
         request_body = json.loads(open_request.call_args.args[0].data.decode("utf-8"))
         self.assertEqual(request_body["query"]["bool"]["filter"][0]["range"]["timestamp"]["gte"], "2026-08-12T00:00:00Z")
         self.assertEqual(request_body["sort"][0]["timestamp"]["order"], "desc")
+
+    def test_tls_certificate_error_is_explained(self):
+        client = WazuhIndexerClient("https://indexer.example", "reader", "secret")
+        certificate_error = ssl.SSLCertVerificationError(1, "self signed")
+        with patch("app.services.wazuh_indexer.urlopen", side_effect=URLError(certificate_error)):
+            with self.assertRaisesRegex(WazuhIndexerError, "TLS certificate verification failed"):
+                client.check_connection()
 
 
 if __name__ == "__main__":

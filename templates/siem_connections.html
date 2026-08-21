@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-title"><div><p class="eyebrow">ADMINISTRATION</p><h2>SIEM connections</h2><p>Configure read-only security data sources. New connections remain disabled until successfully tested.</p></div></div>
+<div class="siem-layout">
+<section class="panel setting-card"><h3>Add connection</h3><form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<label>Friendly name<input name="name" required minlength="3" maxlength="64" placeholder="Primary SOC Indexer"></label>
+<label>Connector type<select name="connector_type">{% for value, connector in connector_types.items() %}<option value="{{ value }}">{{ connector[0] }}</option>{% endfor %}</select></label>
+<div class="form-pair"><label>HTTPS URL<input type="url" name="base_url" required placeholder="https://0.0.0.0"></label><label>Port<input type="number" name="port" value="9200" min="1" max="65535" required></label></div>
+<label>Index pattern<input name="index_pattern" value="wazuh-alerts-*" required maxlength="128"></label>
+<label>Read-only username<input name="username" required maxlength="128" autocomplete="off"></label>
+<label>Password<input type="password" name="password" required autocomplete="new-password"><small>Protected by the signed-in Windows account. It will never be displayed after saving.</small></label>
+<label class="check-label"><input type="checkbox" name="verify_tls" value="1" checked> Verify TLS certificate</label>
+<button type="submit">Save disabled connection</button></form></section>
+<section class="panel"><div class="panel-heading"><div><p class="eyebrow">CONNECTORS</p><h2>Configured sources</h2></div><span>{{ connections|length }} total</span></div>
+<div class="connection-list">{% for item in connections %}<article><div><strong>{{ item.name }}</strong><span class="status-pill {{ 'active' if item.status == 'connected' else 'disabled' }}">{{ item.status|replace('_', ' ') }}</span><p>{{ connector_types[item.connector_type][0] }} · {{ item.display_endpoint }}</p><small>{{ item.index_pattern }} · user {{ item.username }} · TLS {{ 'verified' if item.verify_tls else 'not verified' }}</small>{% if item.last_error %}<p class="connector-error">{{ item.last_error }}</p>{% endif %}</div><dl><dt>Collection</dt><dd>{{ 'Enabled' if item.is_enabled else 'Disabled' }}</dd><dt>Response</dt><dd>{{ item.response_time_ms ~ ' ms' if item.response_time_ms is not none else 'Not measured' }}</dd><dt>Cluster</dt><dd>{{ item.cluster_health or 'Unknown' }}</dd><dt>Last success</dt><dd>{{ item.last_success_at or 'Never' }}</dd></dl><div class="row-actions"><a class="secondary" href="{{ url_for('auth.edit_siem_connection', connection_id=item.id) }}">Edit</a><form method="post" action="{{ url_for('auth.test_siem_connection', connection_id=item.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="secondary">Test connection</button></form><form method="post" action="{{ url_for('auth.toggle_siem_connection', connection_id=item.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">{{ 'Disconnect' if item.is_enabled else 'Enable collection' }}</button></form></div></article>{% else %}<p class="empty-state">No SIEM connection configured. Alerts remain paused.</p>{% endfor %}</div></section>
+</div>
+{% endblock %}

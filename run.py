@@ -10,12 +10,17 @@ from app.auth import init_auth
 from app.routes.auth import auth
 from app.routes.dashboard import dashboard
 from app.services.poller import start_realtime_poller
+from app.single_instance import acquire_server_lock, AlreadyRunningError
 from app.services.recommendation_engine import backfill_recommendations
 from config import PROJECT_TITLE
 
 load_local_environment()
 app = Flask(__name__)
 app.config["PROJECT_TITLE"] = PROJECT_TITLE
+app.config["APP_BUILD"] = "2026.08.21-phase4"
+app.config["SIEM_REALTIME_ENABLED"] = (
+    os.getenv("CDSS_REALTIME_ENABLED", "true").lower() == "true"
+)
 secret_file = Path(__file__).resolve().parent / "data" / "session.key"
 secret_file.parent.mkdir(parents=True, exist_ok=True)
 if not secret_file.exists():
@@ -49,7 +54,7 @@ with app.app_context():
 def secure_headers(response):
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; style-src 'self'; img-src 'self' data:; "
-        "script-src 'none'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'"
+        "script-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'"
     )
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -58,5 +63,9 @@ def secure_headers(response):
     return response
 
 if __name__ == "__main__":
-    start_realtime_poller()
-    app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False)
+    try:
+        acquire_server_lock()
+        start_realtime_poller()
+        app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False)
+    except AlreadyRunningError as error:
+        print(error)

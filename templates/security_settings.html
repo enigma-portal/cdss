@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-title"><div><p class="eyebrow">ADMINISTRATION</p><h2>Security settings</h2><p>Control inactivity protection and the default appearance.</p></div></div>
+<section class="panel setting-card security-settings"><form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<label>Inactivity timeout (minutes)<input type="number" name="session_timeout_minutes" min="5" max="480" required value="{{ settings.session_timeout_minutes.setting_value }}"><small>Users are warned one minute before expiry. Allowed range: 5–480 minutes.</small></label>
+<label>System default colour scheme<select name="default_theme"><option value="navy"{% if settings.default_theme.setting_value == 'navy' %} selected{% endif %}>Navy / Black / Orange</option><option value="high-contrast"{% if settings.default_theme.setting_value == 'high-contrast' %} selected{% endif %}>High contrast</option><option value="light"{% if settings.default_theme.setting_value == 'light' %} selected{% endif %}>Light</option></select><small>Users may override this from their profile.</small></label>
+<h3>Alert collection policy</h3><p>Polling frequency and correlation frequency are different controls.</p>
+<div class="form-pair"><label>Poll interval (seconds)<input type="number" name="poll_interval_seconds" min="10" max="3600" required value="{{ settings.poll_interval_seconds.setting_value }}"><small>How often CDSS checks enabled SIEM connections.</small></label><label>Maximum batch size<input type="number" name="poll_batch_size" min="1" max="1000" required value="{{ settings.poll_batch_size.setting_value }}"><small>Maximum events requested per polling cycle.</small></label></div>
+<div class="form-pair"><label>Minimum source rule level<input type="number" name="minimum_rule_level" min="0" max="16" required value="{{ settings.minimum_rule_level.setting_value }}"><small>Lower-level events are not ingested.</small></label><label>Correlation threshold<input type="number" name="correlation_threshold" min="2" max="100" required value="{{ settings.correlation_threshold.setting_value }}"><small>Repeated matching events needed to escalate a case.</small></label></div>
+<button type="submit">Save security settings</button>
+</form><p class="audit-note">Last changed: {{ settings.session_timeout_minutes.updated_at }}{% if settings.session_timeout_minutes.updated_by %} · user #{{ settings.session_timeout_minutes.updated_by }}{% endif %}</p></section>
+{% endblock %}

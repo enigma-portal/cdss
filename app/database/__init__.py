@@ -267,6 +267,49 @@ def initialize_database():
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     last_login_at TEXT
                 );
+
+                CREATE TABLE IF NOT EXISTS system_settings (
+                    setting_key TEXT PRIMARY KEY,
+                    setting_value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_by INTEGER,
+                    FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS siem_connections (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                    connector_type TEXT NOT NULL DEFAULT 'wazuh_indexer',
+                    base_url TEXT NOT NULL,
+                    port INTEGER NOT NULL CHECK (port BETWEEN 1 AND 65535),
+                    index_pattern TEXT NOT NULL,
+                    username TEXT NOT NULL,
+                    encrypted_password BLOB,
+                    verify_tls INTEGER NOT NULL DEFAULT 1 CHECK (verify_tls IN (0, 1)),
+                    ca_certificate_path TEXT,
+                    is_enabled INTEGER NOT NULL DEFAULT 0 CHECK (is_enabled IN (0, 1)),
+                    status TEXT NOT NULL DEFAULT 'not_tested',
+                    last_success_at TEXT,
+                    last_error TEXT,
+                    response_time_ms INTEGER,
+                    cluster_health TEXT,
+                    last_alert_at TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_by INTEGER,
+                    FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS connector_audit (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    connection_id INTEGER,
+                    actor_user_id INTEGER,
+                    action TEXT NOT NULL,
+                    details TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (connection_id) REFERENCES siem_connections(id) ON DELETE SET NULL,
+                    FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE SET NULL
+                );
             """)
 
             alert_exists = connection.execute(
@@ -287,6 +330,24 @@ def initialize_database():
                 connection.execute("ALTER TABLE incidents ADD COLUMN priority TEXT")
             if "decision_reason" not in incident_columns:
                 connection.execute("ALTER TABLE incidents ADD COLUMN decision_reason TEXT")
+
+            user_columns = {row["name"] for row in connection.execute("PRAGMA table_info(users)")}
+            if "theme" not in user_columns:
+                connection.execute("ALTER TABLE users ADD COLUMN theme TEXT NOT NULL DEFAULT 'system'")
+            if "auth_version" not in user_columns:
+                connection.execute("ALTER TABLE users ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 1")
+            connection.execute("INSERT OR IGNORE INTO system_settings (setting_key, setting_value) VALUES ('session_timeout_minutes', '60')")
+            connection.execute("INSERT OR IGNORE INTO system_settings (setting_key, setting_value) VALUES ('default_theme', 'navy')")
+            for setting_key, setting_value in (
+                ("poll_interval_seconds", "30"),
+                ("poll_batch_size", "100"),
+                ("minimum_rule_level", "5"),
+                ("correlation_threshold", "3"),
+            ):
+                connection.execute(
+                    "INSERT OR IGNORE INTO system_settings (setting_key, setting_value) VALUES (?, ?)",
+                    (setting_key, setting_value),
+                )
 
             connection.executescript("""
                 CREATE INDEX IF NOT EXISTS idx_alerts_event_timestamp ON alerts(event_timestamp);

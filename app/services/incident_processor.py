@@ -119,7 +119,7 @@ def process_alert(raw_alert):
             severity = severity_for_risk(risk.final_risk_score)
             priority = priority_for_risk(risk.final_risk_score)
             explanation = f"{explain_risk(risk)} {context_reason}"
-            title = parsed.rule_description or f"Wazuh rule {parsed.rule_id} incident"
+            title = parsed.rule_description or f"SIEM rule {parsed.rule_id} incident"
             incident_cursor = connection.execute("""
                 INSERT INTO incidents
                     (alert_id, technique_id, title, severity_label, priority,
@@ -127,7 +127,7 @@ def process_alert(raw_alert):
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 alert_id, technique_id, title, severity, priority,
-                parsed.event_timestamp, "Created automatically from a Wazuh Indexer alert.",
+                parsed.event_timestamp, "Created automatically from a SIEM alert.",
                 explanation,
             ))
             incident_id = incident_cursor.lastrowid
@@ -139,7 +139,7 @@ def process_alert(raw_alert):
             """, (
                 incident_id, risk.rule_level_score, risk.technique_risk_score,
                 risk.frequency_score, risk.final_risk_score,
-                "40% Wazuh rule level, 40% MITRE technique base risk, 20% one-hour event frequency.",
+                "40% source rule level, 40% MITRE technique base risk, 20% one-hour event frequency.",
             ))
             groups = tuple((raw_alert.get("rule") or {}).get("groups") or ())
             recommendations = generate_recommendations(
