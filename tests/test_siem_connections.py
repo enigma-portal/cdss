@@ -8,10 +8,16 @@ import app.database as database
 import app.services.secret_store as secret_store
 from app.database import get_db_connection, initialize_database
 from app.services.secret_store import unprotect_secret
+from app.routes.auth import _display_endpoint
 from run import app
 
 
 class SiemConnectionTests(unittest.TestCase):
+    def test_admin_connector_endpoint_displays_configured_address(self):
+        self.assertEqual(
+            _display_endpoint("https://192.0.2.10", 9200),
+            "https://192.0.2.10:9200",
+        )
     def setUp(self):
         self.original_database = database.DATABASE
         self.original_key = secret_store.KEY_FILE
@@ -53,8 +59,8 @@ class SiemConnectionTests(unittest.TestCase):
         self.assertEqual(audit["action"], "created")
         self.assertNotIn("NeverStorePlaintext", audit["details"])
         page = self.client.get("/admin/siem-connections")
-        self.assertIn(b"https://0.0.0.0:9200 (address hidden)", page.data)
-        self.assertNotIn(b"192.0.2.10", page.data)
+        self.assertIn(b"https://192.0.2.10:9200", page.data)
+        self.assertNotIn(b"address hidden", page.data)
 
         edit = self.client.post("/admin/siem-connections/1/edit", data={
             "csrf_token": self.csrf(), "action": "details", "name": "Renamed SIEM",
@@ -67,6 +73,14 @@ class SiemConnectionTests(unittest.TestCase):
         connection.close()
         self.assertEqual(updated["name"], "Renamed SIEM")
         self.assertEqual(updated["status"], "not_tested")
+
+        page = self.client.get("/admin/siem-connections/1/edit")
+        self.assertNotIn(b"Replace password", page.data)
+        rejected = self.client.post("/admin/siem-connections/1/edit", data={
+            "csrf_token": self.csrf(), "action": "password", "password": "DifferentPassword123",
+        })
+        self.assertEqual(rejected.status_code, 200)
+        self.assertIn(b"cannot be changed here", rejected.data)
 
         deleted = self.client.post("/admin/siem-connections/1/delete", data={
             "csrf_token": self.csrf(), "confirm_name": "Renamed SIEM",

@@ -43,17 +43,52 @@ def _poll_once(batch_size, minimum_level):
                 base_url=f'{row["base_url"]}:{row["port"]}', username=row["username"],
                 password=unprotect_secret(row["encrypted_password"]), index_name=row["index_pattern"],
                 verify_tls=bool(row["verify_tls"]), timeout_seconds=10)
-            alerts = connector.fetch_events(size=batch_size, sort_order="desc")
-            accepted = [alert for alert in alerts if int((alert.get("rule") or {}).get("level", 0)) >= minimum_level]
-            for alert in accepted:
-                process_alert(alert)
+            connection = get_db_connection()
+            try:
+                cursor = connection.execute("""
+                    SELECT event_timestamp, document_id FROM ingestion_cursors
+                    WHERE connection_id = ?
+                """, (row["id"],)).fetchone()
+            finally:
+                connection.close()
+            search_after = ((cursor["event_timestamp"], cursor["document_id"])
+                            if cursor and cursor["event_timestamp"] and cursor["document_id"] else None)
+            alerts, next_cursor = connector.fetch_event_page(
+                size=batch_size, search_after=search_after,
+            )
+            accepted_count = 0
+            for alert in alerts:
+                try:
+                    rule = alert.get("rule") if isinstance(alert, dict) else None
+                    if not isinstance(rule, dict):
+                        raise ValueError("SIEM event rule must be an object.")
+                    level = int(rule.get("level", 0))
+                    if level < minimum_level:
+                        continue
+                    process_alert(alert)
+                    accepted_count += 1
+                except (TypeError, ValueError) as error:
+                    # Permanently malformed hostile input is skipped so it cannot
+                    # pin the cursor forever. No raw event content is logged.
+                    LOGGER.warning("Malformed SIEM event skipped for connector %s: %s",
+                                   row["id"], str(error)[:160])
             connection = get_db_connection()
             try:
                 with connection:
                     connection.execute("""UPDATE siem_connections SET status = 'connected',
                         last_success_at = CURRENT_TIMESTAMP, last_error = NULL,
                         last_alert_at = CASE WHEN ? > 0 THEN CURRENT_TIMESTAMP ELSE last_alert_at END
-                        WHERE id = ?""", (len(accepted), row["id"]))
+                        WHERE id = ?""", (accepted_count, row["id"]))
+                    if next_cursor:
+                        connection.execute("""
+                            INSERT INTO ingestion_cursors
+                                (connection_id, event_timestamp, document_id, updated_at)
+                            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                            ON CONFLICT(connection_id) DO UPDATE SET
+                                event_timestamp = excluded.event_timestamp,
+                                document_id = excluded.document_id,
+                                updated_at = CURRENT_TIMESTAMP
+                        """, (row["id"], next_cursor[0], next_cursor[1]))
             finally:
                 connection.close()
         except Exception as error:
@@ -82,8 +117,10 @@ def _poll_loop():
         _STOP.wait(interval)
 
 
-def start_realtime_poller():
+def start_realtime_poller(enabled=True):
     global _THREAD
+    if not enabled:
+        return None
     with _START_LOCK:
         if _THREAD and _THREAD.is_alive():
             return _THREAD

@@ -27,6 +27,9 @@ class WazuhIndexerConnector(SiemConnector):
     def fetch_events(self, *, size, since=None, sort_order="desc"):
         return self.client.fetch_alerts(size=size, since=since, sort_order=sort_order)
 
+    def fetch_event_page(self, *, size, search_after=None):
+        return self.client.fetch_alert_page(size=size, search_after=search_after)
+
 
 CONNECTOR_TYPES = {
     "wazuh_indexer": ("Wazuh Indexer / OpenSearch", WazuhIndexerConnector),

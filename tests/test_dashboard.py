@@ -81,7 +81,7 @@ class DashboardTests(unittest.TestCase):
         self.add_incident("critical", "FILTER-CRITICAL", 1)
         self.add_incident("high", "FILTER-HIGH", 2)
         self.add_incident("low", "FILTER-LOW", 3)
-        response = self.authenticated_client().get("/incidents?view=actionable")
+        response = self.authenticated_client().get("/incidents?view=actionable&q=FILTER-")
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Actionable: High + Critical", response.data)
         self.assertIn(b"FILTER-CRITICAL", response.data)
@@ -90,14 +90,14 @@ class DashboardTests(unittest.TestCase):
         self.assertNotIn(b'<span class="badge low">', response.data)
 
     def test_critical_filter_never_includes_lower_severity(self):
-        self.add_incident("critical", "ONLY-CRITICAL", 11)
-        self.add_incident("high", "NOT-HIGH", 12)
-        self.add_incident("low", "NOT-LOW", 13)
-        response = self.authenticated_client().get("/incidents?severity=critical")
+        self.add_incident("critical", "SEVERITY-CHECK-CRITICAL", 11)
+        self.add_incident("high", "SEVERITY-CHECK-HIGH", 12)
+        self.add_incident("low", "SEVERITY-CHECK-LOW", 13)
+        response = self.authenticated_client().get("/incidents?severity=critical&q=SEVERITY-CHECK")
         self.assertIn(b"Critical only", response.data)
-        self.assertIn(b"ONLY-CRITICAL", response.data)
-        self.assertNotIn(b"NOT-HIGH", response.data)
-        self.assertNotIn(b"NOT-LOW", response.data)
+        self.assertIn(b"SEVERITY-CHECK-CRITICAL", response.data)
+        self.assertNotIn(b"SEVERITY-CHECK-HIGH", response.data)
+        self.assertNotIn(b"SEVERITY-CHECK-LOW", response.data)
 
     def test_direct_page_jump_and_out_of_range_clamp(self):
         for sequence in range(1000, 1125):
@@ -119,6 +119,15 @@ class DashboardTests(unittest.TestCase):
     def test_logout_requires_csrf(self):
         client = self.authenticated_client()
         self.assertEqual(client.post("/logout").status_code, 400)
+
+    def test_untrusted_alert_title_is_html_escaped(self):
+        payload = '<script>alert("stored-xss")</script>'
+        self.add_incident("high", payload, 99001)
+        # Target the inserted row so production-like pagination cannot hide it.
+        response = self.authenticated_client().get("/incidents?q=stored-xss")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(payload.encode(), response.data)
+        self.assertIn(b"&lt;script&gt;alert", response.data)
 
 
 if __name__ == "__main__":

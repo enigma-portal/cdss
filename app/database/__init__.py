@@ -31,6 +31,8 @@ def _create_alerts_table(connection):
             source_ip TEXT,
             destination_ip TEXT,
             mitre_id TEXT,
+            rule_groups TEXT NOT NULL DEFAULT '[]',
+            username TEXT,
             raw_alert TEXT NOT NULL,
             processing_status TEXT NOT NULL DEFAULT 'new'
                 CHECK (processing_status IN ('new', 'processed', 'failed')),
@@ -311,7 +313,6 @@ def initialize_database():
                     FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE SET NULL
                 );
             """)
-
             alert_exists = connection.execute(
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'alerts'"
             ).fetchone()
@@ -330,6 +331,84 @@ def initialize_database():
                 connection.execute("ALTER TABLE incidents ADD COLUMN priority TEXT")
             if "decision_reason" not in incident_columns:
                 connection.execute("ALTER TABLE incidents ADD COLUMN decision_reason TEXT")
+            for column, definition in (
+                ("classification_source", "TEXT NOT NULL DEFAULT 'UNCLASSIFIED'"),
+                ("classification_label", "TEXT NOT NULL DEFAULT 'Unclassified Security Event'"),
+                ("risk_basis", "TEXT NOT NULL DEFAULT 'WAZUH_ONLY'"),
+                ("engine_version", "TEXT NOT NULL DEFAULT '2.0'"),
+            ):
+                if column not in incident_columns:
+                    connection.execute(f"ALTER TABLE incidents ADD COLUMN {column} {definition}")
+
+            alert_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(alerts)")
+            }
+            if "rule_groups" not in alert_columns:
+                connection.execute("ALTER TABLE alerts ADD COLUMN rule_groups TEXT NOT NULL DEFAULT '[]'")
+            if "username" not in alert_columns:
+                connection.execute("ALTER TABLE alerts ADD COLUMN username TEXT")
+
+            connection.executescript("""
+                CREATE TABLE IF NOT EXISTS incident_mitre_techniques (
+                    incident_id INTEGER NOT NULL,
+                    technique_id TEXT NOT NULL,
+                    ordinal INTEGER NOT NULL DEFAULT 0 CHECK (ordinal >= 0),
+                    PRIMARY KEY (incident_id, technique_id),
+                    FOREIGN KEY (incident_id) REFERENCES incidents(id) ON DELETE CASCADE,
+                    FOREIGN KEY (technique_id) REFERENCES mitre_techniques(technique_id)
+                        ON UPDATE CASCADE ON DELETE RESTRICT
+                );
+
+                CREATE TABLE IF NOT EXISTS knowledge_provenance (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    knowledge_base_id INTEGER NOT NULL,
+                    source_framework TEXT NOT NULL,
+                    source_reference TEXT,
+                    source_url TEXT,
+                    source_version TEXT,
+                    mapping_type TEXT NOT NULL CHECK (mapping_type IN
+                        ('official_direct', 'official_cross_mapping', 'project_defined', 'unverified')),
+                    verified_status INTEGER NOT NULL DEFAULT 0 CHECK (verified_status IN (0, 1)),
+                    last_reviewed TEXT,
+                    notes TEXT,
+                    UNIQUE (knowledge_base_id, source_framework, source_reference, mapping_type),
+                    FOREIGN KEY (knowledge_base_id) REFERENCES knowledge_base(id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS ingestion_cursors (
+                    connection_id INTEGER PRIMARY KEY,
+                    event_timestamp TEXT,
+                    document_id TEXT,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (connection_id) REFERENCES siem_connections(id) ON DELETE CASCADE
+                );
+            """)
+            connection.execute("""
+                INSERT OR IGNORE INTO incident_mitre_techniques
+                    (incident_id, technique_id, ordinal)
+                SELECT id, technique_id, 0 FROM incidents WHERE technique_id IS NOT NULL
+            """)
+            connection.execute("""
+                UPDATE incidents
+                SET classification_source = 'MITRE',
+                    classification_label = technique_id,
+                    risk_basis = 'WAZUH_PLUS_MITRE'
+                WHERE technique_id IS NOT NULL AND classification_source = 'UNCLASSIFIED'
+            """)
+            connection.execute("""
+                UPDATE incidents
+                SET decision_reason = REPLACE(
+                    decision_reason, 'MITRE technique risk', 'CDSS Technique Risk Weight'
+                )
+                WHERE decision_reason LIKE '%MITRE technique risk%'
+            """)
+            connection.execute("""
+                UPDATE risk_scores
+                SET calculation_details = REPLACE(
+                    calculation_details, 'MITRE technique base risk', 'CDSS Technique Risk Weight'
+                )
+                WHERE calculation_details LIKE '%MITRE technique base risk%'
+            """)
 
             user_columns = {row["name"] for row in connection.execute("PRAGMA table_info(users)")}
             if "theme" not in user_columns:
@@ -359,6 +438,10 @@ def initialize_database():
                     ON recommendations(knowledge_base_id);
                 CREATE INDEX IF NOT EXISTS idx_incident_recommendations_incident_id
                     ON incident_recommendations(incident_id);
+                CREATE INDEX IF NOT EXISTS idx_incident_mitre_technique
+                    ON incident_mitre_techniques(technique_id);
+                CREATE INDEX IF NOT EXISTS idx_alerts_frequency_context
+                    ON alerts(rule_id, agent_id, source_ip, username, event_timestamp);
                 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
             """)
     finally:

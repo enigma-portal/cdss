@@ -56,8 +56,9 @@ class IncidentProcessorTests(unittest.TestCase):
                 result = process_alert(alert)
             finally:
                 database.DATABASE = original_database
-        self.assertEqual(len(result["recommendations"]), 3)
-        self.assertEqual(result["recommendations"][0]["framework"], "CIS Controls v8")
+        self.assertEqual(len(result["recommendations"]), 2)
+        self.assertEqual(result["recommendations"][0]["framework"], "CDSS project-defined")
+        self.assertIn("No reliable classification", result["recommendations"][0]["rationale"])
 
     def test_creates_one_scored_incident_and_returns_recommendations(self):
         original_database = database.DATABASE
@@ -75,8 +76,8 @@ class IncidentProcessorTests(unittest.TestCase):
         self.assertEqual(result["priority"], "P2")
         self.assertIn("CDSS decision-support score", result["explanation"])
         self.assertEqual(len(result["recommendations"]), 2)
-        self.assertEqual(result["recommendations"][0]["framework"], "MITRE D3FEND + NIST/CIS")
-        self.assertIn("Authentication Monitoring", result["recommendations"][0]["control_reference"])
+        self.assertEqual(result["recommendations"][0]["framework"], "CDSS project-defined")
+        self.assertIn("ATT&CK classification T1110", result["recommendations"][0]["control_reference"])
         self.assertFalse(duplicate["created"])
         self.assertEqual(duplicate["incident_id"], result["incident_id"])
 

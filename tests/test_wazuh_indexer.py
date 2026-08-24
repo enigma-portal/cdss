@@ -19,7 +19,7 @@ class WazuhIndexerClientTests(unittest.TestCase):
         context_manager.__enter__.return_value = response
         client = WazuhIndexerClient("https://indexer.example", "reader", "secret")
 
-        with patch("app.services.wazuh_indexer.urlopen", return_value=context_manager) as open_request:
+        with patch("app.services.wazuh_indexer._open_no_redirect", return_value=context_manager) as open_request:
             alerts = client.fetch_alerts(size=1, since="2026-08-12T00:00:00Z")
 
         self.assertEqual(alerts[0]["id"], "indexer-id")
@@ -30,9 +30,45 @@ class WazuhIndexerClientTests(unittest.TestCase):
     def test_tls_certificate_error_is_explained(self):
         client = WazuhIndexerClient("https://indexer.example", "reader", "secret")
         certificate_error = ssl.SSLCertVerificationError(1, "self signed")
-        with patch("app.services.wazuh_indexer.urlopen", side_effect=URLError(certificate_error)):
+        with patch("app.services.wazuh_indexer._open_no_redirect", side_effect=URLError(certificate_error)):
             with self.assertRaisesRegex(WazuhIndexerError, "TLS certificate verification failed"):
                 client.check_connection()
+
+    def test_incremental_page_uses_search_after_and_returns_cursor(self):
+        response = MagicMock()
+        response.read.return_value = json.dumps({"hits": {"hits": [{
+            "_id": "doc-2", "_source": {"timestamp": "2026-08-24T10:00:01Z"},
+            "sort": ["2026-08-24T10:00:01Z", "doc-2"],
+        }]}}).encode("utf-8")
+        context_manager = MagicMock()
+        context_manager.__enter__.return_value = response
+        client = WazuhIndexerClient("https://indexer.example", "reader", "secret")
+        with patch("app.services.wazuh_indexer._open_no_redirect", return_value=context_manager) as opened:
+            events, cursor = client.fetch_alert_page(
+                size=10, search_after=("2026-08-24T10:00:00Z", "doc-1"))
+        body = json.loads(opened.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(body["search_after"], ["2026-08-24T10:00:00Z", "doc-1"])
+        self.assertEqual(body["sort"][0]["timestamp"]["order"], "asc")
+        self.assertEqual(events[0]["id"], "doc-2")
+        self.assertEqual(cursor, ("2026-08-24T10:00:01Z", "doc-2"))
+
+    def test_first_page_bootstraps_from_latest_batch(self):
+        response = MagicMock()
+        response.read.return_value = json.dumps({"hits": {"hits": [
+            {"_id": "new", "_source": {"timestamp": "2026-08-24T10:00:02Z"},
+             "sort": ["2026-08-24T10:00:02Z", "new"]},
+            {"_id": "old", "_source": {"timestamp": "2026-08-24T10:00:01Z"},
+             "sort": ["2026-08-24T10:00:01Z", "old"]},
+        ]}}).encode("utf-8")
+        context_manager = MagicMock()
+        context_manager.__enter__.return_value = response
+        client = WazuhIndexerClient("https://indexer.example", "reader", "secret")
+        with patch("app.services.wazuh_indexer._open_no_redirect", return_value=context_manager) as opened:
+            events, cursor = client.fetch_alert_page(size=2)
+        body = json.loads(opened.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(body["sort"][0]["timestamp"]["order"], "desc")
+        self.assertEqual([event["id"] for event in events], ["old", "new"])
+        self.assertEqual(cursor, ("2026-08-24T10:00:02Z", "new"))
 
 
 if __name__ == "__main__":

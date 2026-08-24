@@ -124,23 +124,38 @@ def _overview_data():
             ORDER BY actionable DESC, peak_risk DESC LIMIT 6
         """)]
         attacks = [dict(row) for row in connection.execute(f"""
-            SELECT incidents.technique_id, COALESCE(mitre_techniques.technique_name, incidents.title) AS name,
-                   COUNT(*) AS total, MAX(incidents.severity_label) AS severity
+            SELECT incidents.technique_id,
+                   COALESCE(mitre_techniques.technique_name, incidents.classification_label) AS name,
+                   COUNT(*) AS total,
+                   CASE MAX(CASE incidents.severity_label WHEN 'critical' THEN 4
+                            WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1 END)
+                       WHEN 4 THEN 'critical' WHEN 3 THEN 'high'
+                       WHEN 2 THEN 'medium' ELSE 'low' END AS severity
             FROM incidents
             LEFT JOIN mitre_techniques ON mitre_techniques.technique_id = incidents.technique_id
             WHERE {window} AND incidents.severity_label IN ('critical', 'high')
-            GROUP BY incidents.technique_id, name ORDER BY total DESC LIMIT 5
+            GROUP BY incidents.technique_id, incidents.classification_label, mitre_techniques.technique_name
+            ORDER BY total DESC, severity DESC LIMIT 5
         """)]
         queue = [dict(row) for row in connection.execute(f"""
-            SELECT MAX(incidents.id) AS id, incidents.title, incidents.severity_label,
-                   incidents.priority, alerts.rule_id, alerts.agent_name,
-                   COUNT(*) AS occurrences, MAX(incidents.detected_at) AS detected_at,
-                   MAX(COALESCE(risk_scores.final_risk_score, 0)) AS risk
-            FROM incidents JOIN alerts ON alerts.id = incidents.alert_id
-            LEFT JOIN risk_scores ON risk_scores.incident_id = incidents.id
-            WHERE {window} AND incidents.severity_label IN ('critical', 'high')
-            GROUP BY alerts.rule_id, alerts.agent_name
-            ORDER BY risk DESC, occurrences DESC LIMIT 6
+            WITH ranked AS (
+                SELECT incidents.id, incidents.title, incidents.severity_label,
+                       incidents.priority, alerts.rule_id, alerts.agent_name,
+                       incidents.detected_at, COALESCE(risk_scores.final_risk_score, 0) AS risk,
+                       COUNT(*) OVER (PARTITION BY alerts.rule_id, alerts.agent_name) AS occurrences,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY alerts.rule_id, alerts.agent_name
+                           ORDER BY COALESCE(risk_scores.final_risk_score, 0) DESC,
+                                    incidents.detected_at DESC, incidents.id DESC
+                       ) AS representative
+                FROM incidents JOIN alerts ON alerts.id = incidents.alert_id
+                LEFT JOIN risk_scores ON risk_scores.incident_id = incidents.id
+                WHERE {window} AND incidents.severity_label IN ('critical', 'high')
+            )
+            SELECT id, title, severity_label, priority, rule_id, agent_name,
+                   occurrences, detected_at, risk
+            FROM ranked WHERE representative = 1
+            ORDER BY risk DESC, occurrences DESC, id DESC LIMIT 6
         """)]
         return metrics, severity, assets, attacks, queue
     finally:
@@ -188,7 +203,14 @@ def incident_detail(incident_id):
         if not incident:
             abort(404)
         recommendations = get_incident_recommendations(connection, incident_id)
+        techniques = [dict(row) for row in connection.execute("""
+            SELECT imt.technique_id, mt.technique_name, mt.tactic
+            FROM incident_mitre_techniques imt
+            JOIN mitre_techniques mt ON mt.technique_id = imt.technique_id
+            WHERE imt.incident_id = ? ORDER BY imt.ordinal, imt.technique_id
+        """, (incident_id,)).fetchall()]
         return render_template("incident_detail.html", incident=dict(incident),
+                               techniques=techniques,
                                recommendations=[dict(row) for row in recommendations])
     finally:
         connection.close()

@@ -231,4 +231,64 @@ Phase 6: Audit logs, reports, accessibility, security review and final testing.
 - Current automated test baseline: 29 tests passing.
 - Remaining priority: finish Phase 3/4 workflows, then Phase 5 asset/vulnerability and analyst case features.
 
+============================================================
+9. ENGINE CORRECTION PROGRESS - 24 AUGUST 2026
+============================================================
+[DONE] Inspected and traced the existing alert-to-dashboard pipeline.
+[DONE] Added hostile-input validation and deterministic classification precedence.
+[DONE] Added relational multi-MITRE persistence plus classification/risk explainability.
+[DONE] Added mapped and Wazuh-only risk paths without fake technique scores.
+[DONE] Improved contextual frequency logic and risk-sensitive advisory recommendations.
+[DONE] Marked legacy framework guidance project_defined pending source verification.
+[DONE] Made recommendation rebuild retain stored context deterministically.
+[DONE] Added restart-safe search_after ingestion cursor and realtime-disable enforcement.
+[DONE] Corrected dashboard severity ranking and grouped representative rows.
+[DONE] Hardened SIEM SSRF/redirect handling and configurable Secure cookies.
+[DONE] Expanded automated regression/security baseline to 46 passing tests.
+[DONE] Real database migration smoke test: 19 routes, zero foreign-key errors.
+[DONE] Live port-5000 HTTP verification: login, overview, incidents, detail, headers and CSRF.
+[DONE] Live verification found and fixed legacy MITRE-severity terminology in stored incidents.
+[DONE] Repaired lab SIEM connector: self-signed TLS mode, synchronized strong reader credential,
+       cluster health green, read-only search authorized, and real admin test route passed.
+[DONE] Standardized Security Settings layout and clarified global CDSS versus connector controls.
+[DONE] Connected the repeated-event threshold to the actual one-hour recurrence risk calculation.
+[DONE] Re-enabled realtime collection and fixed first-cursor bootstrap to ingest the latest bounded batch.
+[DONE] Live ingestion verified: connector cursor persisted and current 24-hour incidents populated.
+[LIMITATION] Automated visual screenshot comparison remains pending because browser runtime was unavailable.
+[IN PROGRESS] Additional security cases, UI verification and final engineering report.
+[RULE] Do not commit or push until the project owner explicitly requests it.
+
+============================================================
+10. END-OF-DAY SUMMARY - 24 AUGUST 2026
+============================================================
+[DONE] Completed the first engine-correction and security-hardening implementation pass.
+[DONE] Realtime SIEM collection now resumes from a durable cursor and bootstraps from the latest bounded batch.
+[DONE] Live ingestion populated the current 24-hour dashboard instead of replaying the oldest SIEM history.
+[DONE] Confirmed connector failures distinguish authentication, authorization, TLS and network causes.
+[DONE] Confirmed the latest failed replacement connector received HTTP 401 because its stored credential did
+       not match an existing Wazuh Indexer account; network reachability was working.
+[DONE] Removed the misleading connector "Replace password" workflow. CDSS no longer implies that it can
+       reset a remote SIEM account; remote credentials must be managed on the SIEM and the connector recreated.
+[DONE] Guided creation of the cdss_reader internal account and least-privilege wazuh-alerts-* read role.
+[DONE] Clarified the risk trace for SIEM rule 92217: rule level 6 -> 3.75/10, T1570 project-defined
+       technique weight 8/10, recurrence 1/10, producing 4.90/10 by the 40/40/20 formula.
+[DONE] Automated baseline at end of day: 47/47 tests passing.
+
+Highest-priority remaining improvements
+---------------------------------------
+[NEXT] Replace expert-assigned technique constants with a documented, versioned impact-weight rubric.
+[NEXT] Store weight rationale, assessor/source, framework version and review date; expose them in a tooltip.
+[NEXT] Rename "CDSS technique weight" to "Technique impact weight" and clearly state that MITRE does not
+       publish technique severity scores.
+[NEXT] Complete Phase 3/4 connector retry/backoff, failure queue, per-connector polling overrides and health history.
+[NEXT] Build Phase 5 asset inventory, asset criticality and vulnerability-source integration without estimating
+       vulnerability totals when the source is unavailable.
+[NEXT] Add analyst workflow: assignment, owner, status transitions, notes, evidence, SLA and full audit trail.
+[NEXT] Add dashboard time selector, trend charts, saved filters and a dedicated system-health page.
+[NEXT] Add safe retention/archive/purge controls, encrypted backup/restore and incident CSV/PDF reporting.
+[NEXT] Complete accessibility/mobile/visual-browser QA and production deployment hardening (WSGI + trusted TLS).
+[NEXT] Produce the final engineering report, threat model, architecture/data-flow diagrams and evaluation evidence.
+
+[RULE] Future GitHub pushes still require explicit project-owner approval.
+
 END OF STATUS FILE

@@ -9,7 +9,7 @@
 <label>Read-only username<input name="username" required maxlength="128" value="{{ item.username }}" autocomplete="off"></label>
 <label class="check-label"><input type="checkbox" name="verify_tls" value="1"{% if item.verify_tls %} checked{% endif %}> Verify TLS certificate</label>
 <button type="submit">Save connection details</button></form></section>
-<section class="panel setting-card"><h3>Replace password</h3><p>The existing password is never displayed.</p><form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="password"><label>New password<input type="password" name="password" required autocomplete="new-password"></label><button type="submit">Replace password</button></form>
+<section class="panel setting-card"><h3>Credential guidance</h3><p>CDSS cannot change a user password on the SIEM. Reset the account on the SIEM first, then delete and recreate this connector using the same new password.</p>
 <hr><h3>Delete connection</h3><p>Stored alerts and incidents will be preserved. Disconnect first, then type <strong>{{ item.name }}</strong>.</p><form method="post" action="{{ url_for('auth.delete_siem_connection', connection_id=item.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>Connection name confirmation<input name="confirm_name" required autocomplete="off"></label><button type="submit" class="danger-action">Delete connection</button></form></section>
 </div>
 {% endblock %}

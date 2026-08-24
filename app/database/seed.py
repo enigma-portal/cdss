@@ -261,16 +261,35 @@ def seed_knowledge_base():
                     "SELECT id FROM knowledge_base WHERE technique_id = ?",
                     (technique["id"],),
                 ).fetchone()["id"]
+                # Existing defensive labels/actions are curated by this project.
+                # They must not be presented as official cross-framework mappings
+                # until independently verified and reviewed.
+                connection.execute("""
+                    INSERT INTO knowledge_provenance
+                        (knowledge_base_id, source_framework, source_reference,
+                         mapping_type, verified_status, notes)
+                    VALUES (?, 'CDSS', ?, 'project_defined', 0, ?)
+                    ON CONFLICT(knowledge_base_id, source_framework, source_reference, mapping_type)
+                    DO UPDATE SET notes = excluded.notes, verified_status = 0
+                """, (
+                    knowledge_base_id, technique["id"],
+                    "Technique weight and candidate response actions are CDSS-defined; "
+                    "legacy D3FEND/NIST/CIS labels require source verification.",
+                ))
                 connection.execute(
                     "DELETE FROM recommendations WHERE knowledge_base_id = ?",
                     (knowledge_base_id,),
                 )
                 for action_text, response_phase, priority in technique["recommendations"]:
+                    minimum_risk = (6 if response_phase in {
+                        "Containment", "Eradication", "Recovery"
+                    } else 3 if response_phase == "Prevention" else 1)
                     connection.execute("""
                         INSERT INTO recommendations
-                            (knowledge_base_id, action_text, response_phase, priority)
-                        VALUES (?, ?, ?, ?)
-                    """, (knowledge_base_id, action_text, response_phase, priority))
+                            (knowledge_base_id, action_text, response_phase, priority,
+                             minimum_risk_score, maximum_risk_score)
+                        VALUES (?, ?, ?, ?, ?, 10)
+                    """, (knowledge_base_id, action_text, response_phase, priority, minimum_risk))
     finally:
         connection.close()
 

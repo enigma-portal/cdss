@@ -2,12 +2,16 @@
 
 import unittest
 
-from app.risk_engine.scoring import calculate_risk, severity_for_risk
+from app.risk_engine.scoring import calculate_risk, normalize_frequency, severity_for_risk
 from app.services.alert_parser import parse_alert
 from app.services.incident_processor import _contextual_inputs
 
 
 class RiskScoringTests(unittest.TestCase):
+    def test_configured_frequency_threshold_controls_recurrence(self):
+        self.assertEqual(normalize_frequency(4, threshold=5), 1.0)
+        self.assertEqual(normalize_frequency(5, threshold=5), 3.0)
+
     def test_routine_success_does_not_become_high_from_technique_and_volume(self):
         parsed = parse_alert({
             "id": "login", "timestamp": "2026-08-19T10:00:00Z",
