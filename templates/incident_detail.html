@@ -3,22 +3,22 @@
 <a class="back" href="{{ url_for('dashboard.incidents') }}">← Back to incidents</a>
 <section class="detail-head">
   <div><p class="eyebrow">INCIDENT #{{ incident.id }}</p><h2>{{ incident.title }}</h2>
-    <p class="metadata">Detected {{ incident.detected_at }} · Wazuh rule {{ incident.rule_id }}</p></div>
+    <p class="metadata">Detected {{ incident.detected_at }} · SIEM rule {{ incident.rule_id }}</p></div>
   <div class="decision-badges"><span class="badge {{ incident.severity_label }}">{{ incident.severity_label }}</span><span class="priority">{{ incident.priority }}</span><strong>{{ "%.2f"|format(incident.final_risk_score or 0) }}/10</strong></div>
 </section>
 
 <div class="detail-grid">
   <section class="panel detail-card"><h3>Decision factors</h3>
-    <p class="decision-summary">CDSS combined three signals to decide how quickly this alert needs attention.</p>
-    <div class="score-factors"><div><span>Detection strength</span><strong>{{ incident.rule_level_score }}</strong><small>40% of score</small></div><div><span>Threat relevance</span><strong>{{ incident.technique_risk_score }}</strong><small>40% of score</small></div><div><span>Repeat activity</span><strong>{{ incident.frequency_score }}</strong><small>20% of score</small></div></div>
-    <details><summary>Why this priority?</summary><p>{{ incident.decision_reason }}</p><small>CDSS support score; Wazuh's original rule level remains unchanged.</small></details>
+    <p class="decision-summary">Evidence used: {{ incident.classification_source }} classification; {{ incident.risk_basis }} scoring.</p>
+    {% if incident.risk_basis == 'WAZUH_PLUS_MITRE' %}<div class="score-factors"><div><span>Detection strength</span><strong>{{ incident.rule_level_score }}</strong><small>40% of score</small></div><div><span>CDSS technique weight</span><strong>{{ incident.technique_risk_score }}</strong><small>40% · project-defined</small></div><div><span>Repeat activity</span><strong>{{ incident.frequency_score }}</strong><small>20% of score</small></div></div>{% else %}<div class="score-factors"><div><span>Detection strength</span><strong>{{ incident.rule_level_score }}</strong><small>80% of score</small></div><div><span>Repeat activity</span><strong>{{ incident.frequency_score }}</strong><small>20% of score</small></div></div>{% endif %}
+    <details><summary>Why this priority?</summary><p>{{ incident.decision_reason }}</p><small>CDSS support score; the SIEM's original rule level remains unchanged.</small></details>
   </section>
   <section class="panel detail-card"><h3>Alert context</h3><dl>
     <dt>Affected asset</dt><dd>{{ incident.agent_name or 'Unknown agent' }}{% if incident.agent_id %} (#{{ incident.agent_id }}){% endif %}{% if incident.agent_ip %}<br>{{ incident.agent_ip }}{% endif %}</dd>
-    {% if incident.source_ip or incident.destination_ip %}<dt>Network context</dt><dd>{% if incident.source_ip %}Source: {{ incident.source_ip }}{% endif %}{% if incident.source_ip and incident.destination_ip %}<br>{% endif %}{% if incident.destination_ip %}Destination: {{ incident.destination_ip }}{% endif %}</dd>{% else %}<dt>Network context</dt><dd>Not applicable <abbr class="help" title="This is an endpoint event; Wazuh did not supply network addresses." aria-label="Why network addresses are absent">ⓘ</abbr></dd>{% endif %}
-    <dt>Wazuh alert ID</dt><dd>{{ incident.wazuh_alert_id or 'Not supplied by Wazuh' }}</dd><dt>Status</dt><dd>{{ incident.status|title }}</dd>
+    {% if incident.source_ip or incident.destination_ip %}<dt>Network context</dt><dd>{% if incident.source_ip %}Source: {{ incident.source_ip }}{% endif %}{% if incident.source_ip and incident.destination_ip %}<br>{% endif %}{% if incident.destination_ip %}Destination: {{ incident.destination_ip }}{% endif %}</dd>{% endif %}
+    <dt>SIEM alert ID</dt><dd>{{ incident.wazuh_alert_id or 'Not supplied' }}</dd><dt>Status</dt><dd>{{ incident.status|title }}</dd>
   </dl></section>
-  <section class="panel detail-card"><h3>Defense mapping</h3><dl><dt>ATT&CK technique</dt><dd>{% if incident.technique_id %}{{ incident.technique_id }} · {{ incident.technique_name }}{% else %}No mapping supplied by Wazuh{% endif %}</dd><dt>ATT&CK tactic</dt><dd>{{ incident.tactic or 'Not available' }}</dd><dt>MITRE D3FEND</dt><dd>{{ incident.d3fend_technique or 'Context-based NIST/CIS fallback' }}{% if incident.decision_reason and 'Routine successful activity' in incident.decision_reason %}<br><small>Reference only; activate containment only with corroborating evidence.</small>{% endif %}</dd><dt>NIST guidance</dt><dd>{{ incident.nist_ir_guidance or 'Determined per response action below' }}</dd><dt>CIS control</dt><dd>{{ incident.cis_control or 'Determined per response action below' }}</dd></dl></section>
+  <section class="panel detail-card"><h3>Classification</h3><dl><dt>Source</dt><dd>{{ incident.classification_source }}</dd><dt>Classification</dt><dd>{{ incident.classification_label }}</dd><dt>ATT&CK techniques</dt><dd>{% if techniques %}{% for technique in techniques %}{{ technique.technique_id }} · {{ technique.technique_name }}{% if not loop.last %}<br>{% endif %}{% endfor %}{% else %}Not Mapped{% endif %}</dd><dt>Context</dt><dd>{{ incident.rule_groups or 'No recognized group context' }}</dd></dl></section>
 </div>
 
 <section class="panel recommendations"><div class="panel-heading"><div><p class="eyebrow">DECISION SUPPORT</p><h2>Recommended response</h2></div></div>

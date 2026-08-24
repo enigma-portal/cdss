@@ -3,11 +3,13 @@
 Implementation-focused PGD Cybersecurity project that converts read-only Wazuh
 Indexer alerts into explainable incident decisions:
 
-`alert → context → MITRE ATT&CK → CDSS risk score → priority → decision → action`
+`alert → validated context → evidence-based classification → local knowledge → risk → advisory action`
 
-The risk score is a project-specific decision-support score, not an official
-Wazuh score. It combines normalized Wazuh rule level (40%), MITRE technique base
-risk (40%), and same-rule recurrence during the previous hour (20%). Priority
+The risk score is project-specific, not an official SIEM or MITRE score. Mapped
+events combine normalized SIEM rule level (40%), CDSS Technique Risk Weight
+(40%), and contextual recurrence (20%). Unmapped events use normalized SIEM
+rule level (80%) and recurrence (20%); they never receive a fabricated technique
+weight. Priority
 bands are P1 critical (8–10), P2 high (6–7.99), P3 medium (3–5.99), and P4 low.
 An ATT&CK tag is treated as context, not proof of compromise: routine successful
 authentication is confidence-capped and does not escalate merely because it is
@@ -29,8 +31,9 @@ python -m unittest discover -s tests -v
 ## Demonstration
 
 Seed the defensive knowledge base, optionally import history, then start the
-dashboard. The approved web entry point remains `run.py`. While it is running,
-the app polls Wazuh every 30 seconds and safely skips duplicate alert IDs.
+dashboard. The approved web entry point remains `run.py`. When realtime
+collection is enabled, the app uses an ascending OpenSearch `search_after`
+cursor saved in SQLite, preventing silent gaps while retaining deduplication.
 
 ```bash
 python -m app.services.ingest --size 500 --order asc
@@ -48,9 +51,10 @@ high/critical findings and summarizes 24-hour posture, endpoint exposure,
 severity mix, and attack signals. Full searchable, paginated history lives on
 the separate Incidents page. Every incident opens into a detail view
 with scoring evidence and persisted defensive actions. Known ATT&CK techniques
-use reviewed MITRE D3FEND countermeasures connected to NIST and CIS controls;
-other events use labelled NIST SP 800-61, NIST CSF, and CIS Controls v8
-contextual fallbacks instead of returning an empty decision.
+use local technique-specific candidate actions. Existing defensive mappings are
+labelled `project_defined` until exact authoritative references are verified.
+Without ATT&CK, recognized Wazuh groups use explicit local categories; unknown
+events remain `Unclassified Security Event` with conservative guidance.
 
 Optional MITRE catalogue refresh:
 
@@ -64,9 +68,12 @@ python -m app.mitre.taxii_sync
 - SQLite and the Flask development server are appropriate for this lab prototype,
   not a multi-user production deployment.
 - TLS verification should remain enabled outside a self-signed isolated lab.
-- Unknown MITRE techniques receive a neutral default risk and no invented advice.
+- Multiple valid ATT&CK IDs are preserved relationally; Wazuh groups enrich them.
+- Missing/unverified ATT&CK uses Wazuh-only risk without a fake technique score.
+- SIEM redirects and unsafe loopback/link-local/reserved targets are blocked.
 - Controlled attacks must only be performed against authorized lab systems.
 - The app binds to loopback only, uses security headers, limits filter input,
   parameterizes database queries, and never displays or logs Indexer credentials.
 - Passwords use scrypt hashing; state-changing forms use CSRF protection;
-  sessions are HttpOnly/SameSite and role checks protect user administration.
+  sessions are HttpOnly/SameSite; `CDSS_HTTPS_ENABLED=true` enables Secure cookies,
+  and role checks protect administration.

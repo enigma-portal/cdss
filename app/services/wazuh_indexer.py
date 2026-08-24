@@ -6,11 +6,24 @@ import os
 import ssl
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
 
 class WazuhIndexerError(RuntimeError):
     """Raised when the Wazuh Indexer API cannot be used safely."""
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    """Prevent a configured SIEM from redirecting CDSS to another target."""
+
+    def redirect_request(self, request, file_pointer, code, message, headers, new_url):
+        return None
+
+
+def _open_no_redirect(request, context, timeout):
+    return build_opener(_NoRedirect(), HTTPSHandler(context=context)).open(
+        request, timeout=timeout,
+    )
 
 
 class WazuhIndexerClient:
@@ -58,20 +71,23 @@ class WazuhIndexerClient:
             f"{self.base_url}{path}", data=data, headers=headers, method=method,
         )
         try:
-            with urlopen(request, timeout=self.timeout_seconds, context=self.ssl_context) as response:
+            with _open_no_redirect(request, self.ssl_context, self.timeout_seconds) as response:
                 return json.loads(response.read().decode("utf-8"))
         except HTTPError as error:
             if error.code == 401:
                 message = "Authentication failed (HTTP 401). Check the read-only username and password."
             elif error.code == 403:
                 message = "Authorization failed (HTTP 403). The SIEM account lacks read permissions."
+            elif 300 <= error.code < 400:
+                message = "SIEM redirects are blocked to prevent unsafe destination changes."
             else:
                 message = f"SIEM API returned HTTP {error.code}."
             raise WazuhIndexerError(
                 message
             ) from error
         except URLError as error:
-            if isinstance(error.reason, ssl.SSLCertVerificationError):
+            if (isinstance(error.reason, ssl.SSLCertVerificationError)
+                    or "CERTIFICATE_VERIFY_FAILED" in str(error.reason)):
                 message = ("TLS certificate verification failed. For a lab self-signed certificate, "
                            "turn off TLS verification; for production, install the trusted CA certificate.")
             else:
@@ -111,6 +127,44 @@ class WazuhIndexerClient:
             alert.setdefault("id", hit.get("_id"))
             alerts.append(alert)
         return alerts
+
+    def fetch_alert_page(self, size=100, search_after=None):
+        """Return a deterministic page and restart-safe cursor.
+
+        A new connector bootstraps from the latest bounded batch. Subsequent
+        calls move forward from the saved cursor in ascending order.
+        """
+        if not 1 <= size <= 10_000:
+            raise ValueError("size must be between 1 and 10,000.")
+        bootstrap_latest = search_after is None
+        order = "desc" if bootstrap_latest else "asc"
+        payload = {
+            "size": size,
+            "sort": [{"timestamp": {"order": order}}, {"_id": {"order": order}}],
+            "query": {"match_all": {}},
+        }
+        if search_after:
+            if (not isinstance(search_after, (list, tuple)) or len(search_after) != 2
+                    or not all(isinstance(item, str) for item in search_after)):
+                raise ValueError("search_after cursor must contain timestamp and document ID.")
+            payload["search_after"] = list(search_after)
+        safe_index = quote(self.index_name, safe="*,-")
+        response = self._request_json("POST", f"/{safe_index}/_search", payload)
+        hits = response.get("hits", {}).get("hits", [])
+        alerts = []
+        ordered_hits = list(reversed(hits)) if bootstrap_latest else hits
+        for hit in ordered_hits:
+            source = hit.get("_source")
+            if not isinstance(source, dict):
+                continue
+            alert = dict(source)
+            alert.setdefault("id", hit.get("_id"))
+            alerts.append(alert)
+        cursor_hit = hits[0] if bootstrap_latest and hits else hits[-1] if hits else None
+        next_cursor = tuple(cursor_hit.get("sort", ())) if cursor_hit else None
+        if next_cursor and len(next_cursor) != 2:
+            raise WazuhIndexerError("SIEM returned an invalid ingestion cursor.")
+        return alerts, next_cursor
 
     def check_connection(self):
         """Return the Indexer health result without changing any server data."""

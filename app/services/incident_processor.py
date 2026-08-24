@@ -7,11 +7,9 @@ from app.risk_engine.scoring import (
     calculate_risk, explain_risk, priority_for_risk, severity_for_risk,
 )
 from app.services.alert_parser import parse_alert
+from app.services.classification import classify
 from app.services.recommendation_engine import generate_recommendations, save_recommendations
 from app.services.wazuh_indexer import WazuhIndexerClient
-
-
-DEFAULT_TECHNIQUE_RISK = 5.0
 
 
 def _event_window_start(event_timestamp):
@@ -36,26 +34,43 @@ def _ensure_technique(connection, technique_id):
 
 def _base_technique_risk(connection, technique_id):
     if not technique_id:
-        return DEFAULT_TECHNIQUE_RISK
+        return None
     row = connection.execute(
         "SELECT base_risk_score FROM knowledge_base WHERE technique_id = ?", (technique_id,)
     ).fetchone()
-    return row["base_risk_score"] if row else DEFAULT_TECHNIQUE_RISK
+    return row["base_risk_score"] if row else None
 
 
 def _frequency_count(connection, parsed):
     window_start = _event_window_start(parsed.event_timestamp)
     if not window_start:
         return 1
-    row = connection.execute("""
-        SELECT COUNT(*) AS total
-        FROM alerts
-        WHERE rule_id = ?
-          AND COALESCE(agent_id, '') = COALESCE(?, '')
-          AND event_timestamp >= ?
-          AND event_timestamp <= ?
-    """, (parsed.rule_id, parsed.agent_id, window_start, parsed.event_timestamp)).fetchone()
+    clauses = ["rule_id = ?", "event_timestamp >= ?", "event_timestamp <= ?"]
+    values = [parsed.rule_id, window_start, parsed.event_timestamp]
+    # Add only context actually present. This prevents unrelated users/sources
+    # from being combined while still degrading safely for sparse events.
+    for column, value in (
+        ("agent_id", parsed.agent_id), ("source_ip", parsed.source_ip),
+        ("username", parsed.username),
+    ):
+        if value:
+            clauses.append(f"{column} = ?")
+            values.append(value)
+    row = connection.execute(
+        f"SELECT COUNT(*) AS total FROM alerts WHERE {' AND '.join(clauses)}",
+        values,
+    ).fetchone()
     return row["total"] + 1
+
+
+def _frequency_threshold(connection):
+    row = connection.execute("""
+        SELECT setting_value FROM system_settings WHERE setting_key = 'correlation_threshold'
+    """).fetchone()
+    try:
+        return max(2, min(int(row["setting_value"]), 100)) if row else 3
+    except (TypeError, ValueError):
+        return 3
 
 
 def _contextual_inputs(base_risk, parsed, event_count):
@@ -85,11 +100,14 @@ def process_alert(raw_alert):
     incident is returned instead of creating a duplicate.
     """
     parsed = parse_alert(raw_alert)
-    technique_id = parsed.mitre_ids[0] if parsed.mitre_ids else None
+    classification = classify(parsed.mitre_ids, parsed.rule_groups)
+    technique_ids = classification["mitre_ids"]
+    technique_id = technique_ids[0] if technique_ids else None
     connection = get_db_connection()
     try:
         with connection:
-            _ensure_technique(connection, technique_id)
+            for mapped_id in technique_ids:
+                _ensure_technique(connection, mapped_id)
             frequency_count = _frequency_count(connection, parsed)
             record = parsed.as_database_record()
             record["mitre_id"] = technique_id
@@ -111,26 +129,40 @@ def process_alert(raw_alert):
             else:
                 alert_id = cursor.lastrowid
 
-            base_risk = _base_technique_risk(connection, technique_id)
+            mapped_weights = [
+                weight for weight in (
+                    _base_technique_risk(connection, mapped_id) for mapped_id in technique_ids
+                ) if weight is not None
+            ]
+            base_risk = max(mapped_weights) if mapped_weights else None
             technique_risk, scoring_count, context_reason = _contextual_inputs(
                 base_risk, parsed, frequency_count,
+            ) if base_risk is not None else (None, frequency_count, "No verified CDSS technique weight was available; Wazuh-only path used.")
+            risk = calculate_risk(
+                parsed.rule_level, technique_risk, scoring_count,
+                _frequency_threshold(connection),
             )
-            risk = calculate_risk(parsed.rule_level, technique_risk, scoring_count)
             severity = severity_for_risk(risk.final_risk_score)
             priority = priority_for_risk(risk.final_risk_score)
             explanation = f"{explain_risk(risk)} {context_reason}"
-            title = parsed.rule_description or f"SIEM rule {parsed.rule_id} incident"
+            title = parsed.rule_description or classification["label"]
             incident_cursor = connection.execute("""
                 INSERT INTO incidents
                     (alert_id, technique_id, title, severity_label, priority,
-                     detected_at, summary, decision_reason)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     detected_at, summary, decision_reason, classification_source,
+                     classification_label, risk_basis, engine_version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '2.0')
             """, (
                 alert_id, technique_id, title, severity, priority,
                 parsed.event_timestamp, "Created automatically from a SIEM alert.",
-                explanation,
+                explanation, classification["source"], classification["label"], risk.risk_basis,
             ))
             incident_id = incident_cursor.lastrowid
+            for ordinal, mapped_id in enumerate(technique_ids):
+                connection.execute("""
+                    INSERT OR IGNORE INTO incident_mitre_techniques
+                        (incident_id, technique_id, ordinal) VALUES (?, ?, ?)
+                """, (incident_id, mapped_id, ordinal))
             connection.execute("""
                 INSERT INTO risk_scores
                     (incident_id, rule_level_score, technique_risk_score,
@@ -139,13 +171,15 @@ def process_alert(raw_alert):
             """, (
                 incident_id, risk.rule_level_score, risk.technique_risk_score,
                 risk.frequency_score, risk.final_risk_score,
-                "40% source rule level, 40% MITRE technique base risk, 20% one-hour event frequency.",
+                ("40% normalized SIEM rule level, 40% CDSS Technique Risk Weight, 20% contextual recurrence."
+                 if risk.risk_basis == "WAZUH_PLUS_MITRE" else
+                 "80% normalized SIEM rule level, 20% contextual recurrence; no MITRE weight used."),
             ))
-            groups = tuple((raw_alert.get("rule") or {}).get("groups") or ())
             recommendations = generate_recommendations(
-                connection, technique_id, risk.final_risk_score,
-                parsed.rule_description, groups, parsed.source_ip,
+                connection, technique_ids, risk.final_risk_score,
+                parsed.rule_description, parsed.rule_groups, parsed.source_ip,
                 parsed.agent_name, parsed.agent_ip,
+                classification=classification, username=parsed.username,
             )
             save_recommendations(connection, incident_id, recommendations)
             return {

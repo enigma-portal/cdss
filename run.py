@@ -17,7 +17,7 @@ from config import PROJECT_TITLE
 load_local_environment()
 app = Flask(__name__)
 app.config["PROJECT_TITLE"] = PROJECT_TITLE
-app.config["APP_BUILD"] = "2026.08.21-phase4"
+app.config["APP_BUILD"] = "2026.08.24-engine2"
 app.config["SIEM_REALTIME_ENABLED"] = (
     os.getenv("CDSS_REALTIME_ENABLED", "true").lower() == "true"
 )
@@ -29,7 +29,7 @@ app.config.update(
     SECRET_KEY=secret_file.read_text(encoding="ascii").strip(),
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Strict",
-    SESSION_COOKIE_SECURE=False,
+    SESSION_COOKIE_SECURE=os.getenv("CDSS_HTTPS_ENABLED", "false").lower() == "true",
     PERMANENT_SESSION_LIFETIME=3600,
     MAX_CONTENT_LENGTH=64 * 1024,
 )
@@ -65,7 +65,7 @@ def secure_headers(response):
 if __name__ == "__main__":
     try:
         acquire_server_lock()
-        start_realtime_poller()
+        start_realtime_poller(app.config["SIEM_REALTIME_ENABLED"])
         app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False)
     except AlreadyRunningError as error:
         print(error)

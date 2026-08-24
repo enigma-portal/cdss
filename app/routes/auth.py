@@ -42,8 +42,9 @@ def _validated_siem_endpoint(raw_url, raw_port, resolve=False):
             raise ValueError("The SIEM hostname could not be resolved.") from error
         for address in addresses:
             ip = ipaddress.ip_address(address)
-            if ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_unspecified:
-                raise ValueError("Loopback, link-local and multicast SIEM destinations are blocked.")
+            if (ip.is_loopback or ip.is_link_local or ip.is_multicast
+                    or ip.is_unspecified or ip.is_reserved):
+                raise ValueError("Loopback, link-local, reserved and multicast SIEM destinations are blocked.")
     return f"https://{parsed.hostname}", port
 
 
@@ -54,8 +55,9 @@ def _audit_connector(connection, connection_id, action, details):
     )
 
 
-def _masked_endpoint(port):
-    return f"https://0.0.0.0:{port} (address hidden)"
+def _display_endpoint(base_url, port):
+    """Show the configured endpoint only inside the admin-only connector page."""
+    return f"{base_url}:{port}"
 
 
 def _users_exist(connection):
@@ -407,7 +409,9 @@ def siem_connections():
                                      username, verify_tls, is_enabled, status, last_success_at,
                                      last_error, response_time_ms, cluster_health, last_alert_at
                               FROM siem_connections ORDER BY name""").fetchall()
-        items = [dict(row) | {"display_endpoint": _masked_endpoint(row["port"])} for row in rows]
+        items = [dict(row) | {
+            "display_endpoint": _display_endpoint(row["base_url"], row["port"])
+        } for row in rows]
         return render_template("siem_connections.html", connections=items, connector_types=CONNECTOR_TYPES)
     finally:
         connection.close()
@@ -484,13 +488,8 @@ def edit_siem_connection(connection_id):
             validate_csrf()
             action = request.form.get("action", "details")
             try:
-                if action == "password":
-                    password = request.form.get("password", "")
-                    encrypted = protect_secret(password)
-                    with connection:
-                        connection.execute("UPDATE siem_connections SET encrypted_password = ?, status = 'not_tested', is_enabled = 0, updated_at = CURRENT_TIMESTAMP, updated_by = ? WHERE id = ?", (encrypted, g.user["id"], connection_id))
-                        _audit_connector(connection, connection_id, "password_replaced", "Credential replaced; value omitted. Connection disabled pending test.")
-                    flash("Password replaced. Test the connection before enabling.", "success")
+                if action != "details":
+                    raise ValueError("Connector credentials cannot be changed here. Reset the account on the SIEM, then recreate the connector.")
                 else:
                     name = request.form.get("name", "").strip()
                     base_url, port = _validated_siem_endpoint(request.form.get("base_url", ""), request.form.get("port", "9200"))
