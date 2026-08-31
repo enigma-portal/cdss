@@ -1,4 +1,4 @@
-# Cyber Incident Decision Support System (CDSS)
+# Prototype of Cyber Incident Decision Support System
 
 ## Overview
 
