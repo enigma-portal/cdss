@@ -1,6 +1,7 @@
 """Connect parsed Wazuh alerts to CDSS incidents, scoring, and recommendations."""
 
 from datetime import datetime, timedelta, timezone
+import json
 
 from app.database import get_db_connection
 from app.risk_engine.scoring import (
@@ -10,6 +11,7 @@ from app.services.alert_parser import parse_alert
 from app.services.classification import classify
 from app.services.recommendation_engine import generate_recommendations, save_recommendations
 from app.services.wazuh_indexer import WazuhIndexerClient
+from app.services.asset_resolver import resolve_asset_id
 
 
 def _event_window_start(event_timestamp):
@@ -100,34 +102,54 @@ def process_alert(raw_alert):
     incident is returned instead of creating a duplicate.
     """
     parsed = parse_alert(raw_alert)
+    if not parsed.wazuh_alert_id:
+        raise ValueError("A Wazuh/source alert identifier is required for safe ingestion.")
     classification = classify(parsed.mitre_ids, parsed.rule_groups)
     technique_ids = classification["mitre_ids"]
     technique_id = technique_ids[0] if technique_ids else None
     connection = get_db_connection()
     try:
+        # Store the validated source first as ``new``. Downstream work occurs in
+        # a separate transaction so failures remain visible and retryable.
         with connection:
             for mapped_id in technique_ids:
                 _ensure_technique(connection, mapped_id)
-            frequency_count = _frequency_count(connection, parsed)
             record = parsed.as_database_record()
-            record["mitre_id"] = technique_id
+            record["asset_id"] = resolve_asset_id(connection, parsed.agent_id)
             columns = ", ".join(record)
             placeholders = ", ".join("?" for _ in record)
             cursor = connection.execute(
                 f"INSERT OR IGNORE INTO alerts ({columns}) VALUES ({placeholders})",
                 tuple(record.values()),
             )
-            if cursor.rowcount == 0 and parsed.wazuh_alert_id:
-                alert_id = connection.execute(
-                    "SELECT id FROM alerts WHERE wazuh_alert_id = ?", (parsed.wazuh_alert_id,)
-                ).fetchone()["id"]
+            if cursor.rowcount:
+                alert_id = cursor.lastrowid
+            else:
+                existing = connection.execute(
+                    "SELECT id, raw_alert FROM alerts WHERE wazuh_alert_id = ?", (parsed.wazuh_alert_id,)
+                ).fetchone()
+                if not existing:
+                    raise RuntimeError("Alert storage failed without a duplicate source identifier.")
+                alert_id = existing["id"]
                 incident = connection.execute(
                     "SELECT id FROM incidents WHERE alert_id = ?", (alert_id,)
                 ).fetchone()
                 if incident:
+                    connection.execute(
+                        "UPDATE alerts SET processing_status = 'processed' WHERE id = ?", (alert_id,)
+                    )
                     return {"incident_id": incident["id"], "created": False}
-            else:
-                alert_id = cursor.lastrowid
+                # A failed/new duplicate is retried from the immutable stored
+                # source, never from potentially different caller content.
+                parsed = parse_alert(json.loads(existing["raw_alert"]))
+                classification = classify(parsed.mitre_ids, parsed.rule_groups)
+                technique_ids = classification["mitre_ids"]
+                technique_id = technique_ids[0] if technique_ids else None
+
+        asset_id = resolve_asset_id(connection, parsed.agent_id)
+        try:
+          with connection:
+            frequency_count = _frequency_count(connection, parsed)
 
             mapped_weights = [
                 weight for weight in (
@@ -148,12 +170,12 @@ def process_alert(raw_alert):
             title = parsed.rule_description or classification["label"]
             incident_cursor = connection.execute("""
                 INSERT INTO incidents
-                    (alert_id, technique_id, title, severity_label, priority,
+                    (alert_id, technique_id, asset_id, title, severity_label, priority,
                      detected_at, summary, decision_reason, classification_source,
                      classification_label, risk_basis, engine_version)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '2.0')
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '2.0')
             """, (
-                alert_id, technique_id, title, severity, priority,
+                alert_id, technique_id, asset_id, title, severity, priority,
                 parsed.event_timestamp, "Created automatically from a SIEM alert.",
                 explanation, classification["source"], classification["label"], risk.risk_basis,
             ))
@@ -182,6 +204,9 @@ def process_alert(raw_alert):
                 classification=classification, username=parsed.username,
             )
             save_recommendations(connection, incident_id, recommendations)
+            connection.execute(
+                "UPDATE alerts SET processing_status = 'processed' WHERE id = ?", (alert_id,)
+            )
             return {
                 "incident_id": incident_id,
                 "created": True,
@@ -191,6 +216,12 @@ def process_alert(raw_alert):
                 "explanation": explanation,
                 "recommendations": recommendations,
             }
+        except Exception:
+            with connection:
+                connection.execute(
+                    "UPDATE alerts SET processing_status = 'failed' WHERE id = ?", (alert_id,)
+                )
+            raise
     finally:
         connection.close()
 

@@ -1,0 +1,9 @@
+{% extends 'base.html' %}{% block content %}
+<div class="page-title"><div><span class="eyebrow">Administration</span><h1>Asset inventory</h1><p>Business context configured by an administrator. Alerts map by exact Wazuh agent ID only.</p></div></div>
+<div class="asset-admin-grid">
+ <section class="setting-card"><h2>Add asset</h2><form method="post" class="asset-form">{% set asset = none %}{% include '_asset_form.html' %}<button type="submit">Create asset</button></form></section>
+ <section class="panel"><div class="panel-heading"><div><span class="eyebrow">Configured assets</span><h2>Assets</h2></div><span>{{ assets|length }} total</span></div>
+ <div class="asset-table"><table><thead><tr><th>Name</th><th>Context</th><th>Agent ID</th><th>Criticality</th><th>Alerts</th><th></th></tr></thead><tbody>
+ {% for item in assets %}<tr><td><strong>{{ item.asset_name }}</strong><small>{{ item.ip_address or 'IP unavailable' }}</small></td><td>{{ item.asset_type }} · {{ item.asset_role }}<small>{{ item.os_family }} / {{ item.os_name }} · {{ 'Protected' if item.is_protected else 'Not protected' }}</small></td><td>{{ item.wazuh_agent_id or 'Unmapped' }}</td><td><span class="status-pill {{ 'active' if item.criticality in ('high','critical') else 'disabled' }}">{{ item.criticality|title }}</span></td><td>{{ item.alert_count }}</td><td><a class="secondary" href="{{ url_for('assets.edit', asset_id=item.id) }}">Edit</a></td></tr>
+ {% else %}<tr><td colspan="6" class="empty-state">No assets configured.</td></tr>{% endfor %}</tbody></table></div></section>
+</div>{% endblock %}

@@ -34,6 +34,12 @@ class WazuhIndexerClientTests(unittest.TestCase):
             with self.assertRaisesRegex(WazuhIndexerError, "TLS certificate verification failed"):
                 client.check_connection()
 
+    def test_malformed_json_structure_is_distinguished(self):
+        client = WazuhIndexerClient("https://indexer.example", "reader", "secret")
+        with patch.object(client, "_request_json", return_value={"unexpected": []}):
+            with self.assertRaisesRegex(WazuhIndexerError, "malformed JSON"):
+                client.fetch_alert_page(size=10)
+
     def test_incremental_page_uses_search_after_and_returns_cursor(self):
         response = MagicMock()
         response.read.return_value = json.dumps({"hits": {"hits": [{
@@ -69,6 +75,22 @@ class WazuhIndexerClientTests(unittest.TestCase):
         self.assertEqual(body["sort"][0]["timestamp"]["order"], "desc")
         self.assertEqual([event["id"] for event in events], ["old", "new"])
         self.assertEqual(cursor, ("2026-08-24T10:00:02Z", "new"))
+
+    def test_same_timestamp_documents_are_ordered_and_resumed_by_id(self):
+        response = MagicMock()
+        response.read.return_value = json.dumps({"hits": {"hits": [
+            {"_id": "doc-b", "_source": {"timestamp": "2026-08-24T10:00:00Z"},
+             "sort": ["2026-08-24T10:00:00Z", "doc-b"]},
+        ]}}).encode("utf-8")
+        context_manager = MagicMock(); context_manager.__enter__.return_value = response
+        client = WazuhIndexerClient("https://indexer.example", "reader", "secret")
+        with patch("app.services.wazuh_indexer._open_no_redirect", return_value=context_manager) as opened:
+            events, cursor = client.fetch_alert_page(
+                size=10, search_after=("2026-08-24T10:00:00Z", "doc-a"))
+        body = json.loads(opened.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(body["search_after"], ["2026-08-24T10:00:00Z", "doc-a"])
+        self.assertEqual(events[0]["id"], "doc-b")
+        self.assertEqual(cursor, ("2026-08-24T10:00:00Z", "doc-b"))
 
 
 if __name__ == "__main__":

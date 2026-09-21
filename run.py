@@ -9,6 +9,7 @@ from app.environment import load_local_environment
 from app.auth import init_auth
 from app.routes.auth import auth
 from app.routes.dashboard import dashboard
+from app.routes.assets import assets
 from app.services.poller import start_realtime_poller
 from app.single_instance import acquire_server_lock, AlreadyRunningError
 from app.services.recommendation_engine import backfill_recommendations
@@ -36,6 +37,7 @@ app.config.update(
 init_auth(app)
 app.register_blueprint(auth)
 app.register_blueprint(dashboard)
+app.register_blueprint(assets)
 
 # Make sure the local SQLite database is ready whenever the app starts.
 initialize_database()

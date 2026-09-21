@@ -1,10 +1,98 @@
 """SQLite connection and schema setup for the CDSS project."""
 
+import json
+import re
 import sqlite3
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 DATABASE = BASE_DIR / "data" / "cdss.db"
+
+
+def _ensure_asset_schema(connection):
+    """Add the Phase 1 asset foundation without replacing existing records."""
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS assets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            asset_name TEXT NOT NULL,
+            asset_type TEXT NOT NULL CHECK (asset_type IN
+                ('Endpoint', 'Server', 'Network Device', 'Security Appliance',
+                 'Cloud Asset', 'Other')),
+            asset_role TEXT NOT NULL,
+            os_family TEXT NOT NULL,
+            os_name TEXT NOT NULL,
+            ip_address TEXT,
+            wazuh_agent_id TEXT,
+            criticality TEXT NOT NULL CHECK (criticality IN
+                ('low', 'medium', 'high', 'critical')),
+            is_protected INTEGER NOT NULL CHECK (is_protected IN (0, 1)),
+            description TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    alert_columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(alerts)")
+    }
+    if "asset_id" not in alert_columns:
+        connection.execute("""
+            ALTER TABLE alerts ADD COLUMN asset_id INTEGER
+            REFERENCES assets(id) ON DELETE SET NULL
+        """)
+    incident_columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(incidents)")
+    }
+    if "asset_id" not in incident_columns:
+        connection.execute("""
+            ALTER TABLE incidents ADD COLUMN asset_id INTEGER
+            REFERENCES assets(id) ON DELETE SET NULL
+        """)
+    connection.executescript("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_assets_wazuh_agent_id_unique
+            ON assets(wazuh_agent_id) WHERE wazuh_agent_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_assets_asset_name ON assets(asset_name);
+        CREATE INDEX IF NOT EXISTS idx_assets_ip_address ON assets(ip_address);
+        CREATE INDEX IF NOT EXISTS idx_alerts_asset_id ON alerts(asset_id);
+        CREATE INDEX IF NOT EXISTS idx_incidents_asset_id ON incidents(asset_id);
+    """)
+
+
+def _ensure_phase2_alert_schema(connection):
+    """Preserve source-provided ATT&CK IDs and repair legacy status safely."""
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(alerts)")}
+    if "wazuh_mitre_ids" not in columns:
+        connection.execute(
+            "ALTER TABLE alerts ADD COLUMN wazuh_mitre_ids TEXT NOT NULL DEFAULT '[]'"
+        )
+    technique_pattern = re.compile(r"^T\d{4}(?:\.\d{3})?$")
+    rows = connection.execute(
+        "SELECT id, raw_alert FROM alerts WHERE wazuh_mitre_ids = '[]'"
+    ).fetchall()
+    for row in rows:
+        try:
+            source = json.loads(row["raw_alert"])
+            values = ((source.get("rule") or {}).get("mitre") or {}).get("id", [])
+            if isinstance(values, str):
+                values = [values]
+            normalized = []
+            if isinstance(values, list):
+                for value in values:
+                    candidate = str(value).strip().upper()
+                    if technique_pattern.fullmatch(candidate) and candidate not in normalized:
+                        normalized.append(candidate)
+            if normalized:
+                connection.execute(
+                    "UPDATE alerts SET wazuh_mitre_ids = ? WHERE id = ?",
+                    (json.dumps(normalized, separators=(",", ":")), row["id"]),
+                )
+        except (TypeError, ValueError, json.JSONDecodeError):
+            # The original raw record remains available; no values are fabricated.
+            continue
+    connection.execute("""
+        UPDATE alerts SET processing_status = 'processed'
+         WHERE processing_status = 'new'
+           AND EXISTS (SELECT 1 FROM incidents WHERE incidents.alert_id = alerts.id)
+    """)
 
 
 def get_db_connection():
@@ -31,6 +119,7 @@ def _create_alerts_table(connection):
             source_ip TEXT,
             destination_ip TEXT,
             mitre_id TEXT,
+            wazuh_mitre_ids TEXT NOT NULL DEFAULT '[]',
             rule_groups TEXT NOT NULL DEFAULT '[]',
             username TEXT,
             raw_alert TEXT NOT NULL,
@@ -347,6 +436,9 @@ def initialize_database():
                 connection.execute("ALTER TABLE alerts ADD COLUMN rule_groups TEXT NOT NULL DEFAULT '[]'")
             if "username" not in alert_columns:
                 connection.execute("ALTER TABLE alerts ADD COLUMN username TEXT")
+
+            _ensure_asset_schema(connection)
+            _ensure_phase2_alert_schema(connection)
 
             connection.executescript("""
                 CREATE TABLE IF NOT EXISTS incident_mitre_techniques (

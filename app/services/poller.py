@@ -1,12 +1,14 @@
 """Fault-tolerant polling for enabled vendor-neutral SIEM connectors."""
 
 import logging
+import sqlite3
 from threading import Event, Lock, Thread
 
 from app.database import get_db_connection
 from app.services.connectors import create_connector
 from app.services.incident_processor import process_alert
 from app.services.secret_store import unprotect_secret
+from app.services.wazuh_indexer import WazuhIndexerError
 
 LOGGER = logging.getLogger(__name__)
 _START_LOCK = Lock()
@@ -29,6 +31,17 @@ def _poll_configuration(connection):
         _bounded_integer(settings.get("poll_batch_size"), 100, 1, 1000),
         _bounded_integer(settings.get("minimum_rule_level"), 5, 0, 16),
     )
+
+
+def _safe_poll_error(error):
+    """Return diagnostic categories without echoing arbitrary secret-bearing text."""
+    if isinstance(error, WazuhIndexerError):
+        return str(error)[:240]
+    if isinstance(error, sqlite3.DatabaseError):
+        return "CDSS database operation failed while handling the SIEM batch."
+    if isinstance(error, (TypeError, ValueError)):
+        return f"SIEM event validation failed: {str(error)[:180]}"
+    return "Unexpected SIEM polling failure; review protected application logs."
 
 
 def _poll_once(batch_size, minimum_level):
@@ -57,6 +70,7 @@ def _poll_once(batch_size, minimum_level):
                 size=batch_size, search_after=search_after,
             )
             accepted_count = 0
+            rejected_error = None
             for alert in alerts:
                 try:
                     rule = alert.get("rule") if isinstance(alert, dict) else None
@@ -68,10 +82,14 @@ def _poll_once(batch_size, minimum_level):
                     process_alert(alert)
                     accepted_count += 1
                 except (TypeError, ValueError) as error:
-                    # Permanently malformed hostile input is skipped so it cannot
-                    # pin the cursor forever. No raw event content is logged.
                     LOGGER.warning("Malformed SIEM event skipped for connector %s: %s",
                                    row["id"], str(error)[:160])
+                    rejected_error = error
+                    break
+            if rejected_error:
+                # Without a rejected-event store, advancing would silently lose
+                # this source record. Keep the prior cursor for explicit review.
+                raise ValueError(str(rejected_error))
             connection = get_db_connection()
             try:
                 with connection:
@@ -92,12 +110,13 @@ def _poll_once(batch_size, minimum_level):
             finally:
                 connection.close()
         except Exception as error:
-            LOGGER.warning("SIEM polling failed for connector %s: %s", row["id"], error)
+            safe_error = _safe_poll_error(error)
+            LOGGER.warning("SIEM polling failed for connector %s: %s", row["id"], safe_error)
             connection = get_db_connection()
             try:
                 with connection:
                     connection.execute("UPDATE siem_connections SET status = 'error', last_error = ? WHERE id = ?",
-                                       (str(error)[:240], row["id"]))
+                                       (safe_error, row["id"]))
             finally:
                 connection.close()
 

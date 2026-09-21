@@ -122,11 +122,21 @@ class WazuhIndexerClient:
         safe_index = quote(self.index_name, safe="*,-")
         response = self._request_json("POST", f"/{safe_index}/_search", payload)
         alerts = []
-        for hit in response.get("hits", {}).get("hits", []):
+        for hit in self._validated_hits(response):
             alert = dict(hit.get("_source", {}))
             alert.setdefault("id", hit.get("_id"))
             alerts.append(alert)
         return alerts
+
+    @staticmethod
+    def _validated_hits(response):
+        """Reject structurally malformed JSON instead of treating it as no alerts."""
+        if not isinstance(response, dict) or not isinstance(response.get("hits"), dict):
+            raise WazuhIndexerError("SIEM returned malformed JSON: hits object is unavailable.")
+        hits = response["hits"].get("hits")
+        if not isinstance(hits, list) or not all(isinstance(hit, dict) for hit in hits):
+            raise WazuhIndexerError("SIEM returned malformed JSON: alert hits must be a list.")
+        return hits
 
     def fetch_alert_page(self, size=100, search_after=None):
         """Return a deterministic page and restart-safe cursor.
@@ -150,7 +160,7 @@ class WazuhIndexerClient:
             payload["search_after"] = list(search_after)
         safe_index = quote(self.index_name, safe="*,-")
         response = self._request_json("POST", f"/{safe_index}/_search", payload)
-        hits = response.get("hits", {}).get("hits", [])
+        hits = self._validated_hits(response)
         alerts = []
         ordered_hits = list(reversed(hits)) if bootstrap_latest else hits
         for hit in ordered_hits:

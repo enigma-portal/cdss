@@ -1,0 +1,19 @@
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<label>Asset name / hostname <input name="asset_name" maxlength="255" required value="{{ asset.asset_name if asset else request.form.get('asset_name','') }}"></label>
+<div class="form-pair">
+  <label>Asset type <select name="asset_type" id="asset-type" required><option value="">Select type</option>{% for item in catalogue %}<option{% if (asset and asset.asset_type == item) or request.form.get('asset_type') == item %} selected{% endif %}>{{ item }}</option>{% endfor %}</select></label>
+  <label>Asset role <select name="asset_role" id="asset-role" required data-selected="{{ asset.asset_role if asset else request.form.get('asset_role','') }}"></select></label>
+</div>
+<div class="form-pair">
+  <label>OS family <select name="os_family" id="os-family" required data-selected="{{ asset.os_family if asset else request.form.get('os_family','') }}"></select></label>
+  <label>OS name <select name="os_name" id="os-name" required data-selected="{{ asset.os_name if asset else request.form.get('os_name','') }}"></select></label>
+</div>
+<div class="form-pair">
+  <label>IP address <input name="ip_address" value="{{ asset.ip_address or '' if asset else request.form.get('ip_address','') }}" placeholder="Optional"></label>
+  <label>Wazuh agent ID <input name="wazuh_agent_id" maxlength="64" value="{{ asset.wazuh_agent_id or '' if asset else request.form.get('wazuh_agent_id','') }}" placeholder="Optional; exact match only"></label>
+</div>
+<label>Business criticality <select name="criticality" required><option value="">Select explicitly</option>{% for item in criticalities %}<option value="{{ item }}"{% if (asset and asset.criticality == item) or request.form.get('criticality') == item %} selected{% endif %}>{{ item|title }}</option>{% endfor %}</select></label>
+<label class="check-label"><input type="checkbox" name="is_protected" value="1"{% if (asset and asset.is_protected) or (not asset and request.form.get('is_protected')) %} checked{% endif %}> Protected asset participating in future contextual assessment</label>
+<label>Description <textarea name="description" maxlength="2000" rows="4">{{ asset.description or '' if asset else request.form.get('description','') }}</textarea></label>
+<script type="application/json" id="asset-catalogue">{{ catalogue|tojson }}</script>
+<script src="{{ url_for('static', filename='js/assets.js') }}" defer></script>

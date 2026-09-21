@@ -31,6 +31,7 @@ class ParsedAlert:
         mitre_ids = record.pop("mitre_ids")
         groups = record.pop("rule_groups")
         record["mitre_id"] = mitre_ids[0] if mitre_ids else None
+        record["wazuh_mitre_ids"] = json.dumps(mitre_ids, separators=(",", ":"))
         record["rule_groups"] = json.dumps(groups, separators=(",", ":"))
         return record
 
