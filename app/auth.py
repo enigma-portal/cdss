@@ -8,6 +8,7 @@ from functools import wraps
 from flask import abort, g, redirect, request, session, url_for
 
 from app.database import get_db_connection
+from app.services.siem_collection_status import overall_collection_status
 
 
 def init_auth(app):
@@ -19,9 +20,12 @@ def init_auth(app):
             settings = dict(connection.execute(
                 "SELECT setting_key, setting_value FROM system_settings"
             ).fetchall())
-            g.siem_monitoring_active = connection.execute(
-                "SELECT 1 FROM siem_connections WHERE is_enabled = 1 LIMIT 1"
-            ).fetchone() is not None
+            connectors = connection.execute(
+                "SELECT is_enabled, status, last_success_at FROM siem_connections"
+            ).fetchall()
+            g.siem_collection_status = overall_collection_status(
+                connectors, settings.get('poll_interval_seconds', '30'),
+                polling_enabled=app.config.get('SIEM_REALTIME_ENABLED', True))
         finally:
             connection.close()
         try:
@@ -62,7 +66,7 @@ def init_auth(app):
         selected = user["theme"] if user and user["theme"] != "system" else g.get("default_theme", "navy")
         return {"current_user": user, "csrf_token": csrf_token,
                 "effective_theme": selected,
-                "siem_monitoring_active": g.get("siem_monitoring_active", False),
+                "siem_collection_status": g.get("siem_collection_status"),
                 "session_timeout_seconds": g.get("session_timeout_seconds", 3600)}
 
 
@@ -77,7 +81,8 @@ def csrf_token():
 def validate_csrf():
     expected = session.get("csrf_token", "")
     supplied = request.form.get("csrf_token", "")
-    if not expected or not supplied or not hmac.compare_digest(expected, supplied):
+    if (not expected or not supplied or not supplied.isascii()
+            or not hmac.compare_digest(expected, supplied)):
         abort(400, "Invalid form token. Refresh the page and try again.")
 
 

@@ -8,10 +8,34 @@
 <div class="form-pair"><label>HTTPS URL<input type="url" name="base_url" required placeholder="https://0.0.0.0"></label><label>Port<input type="number" name="port" value="9200" min="1" max="65535" required></label></div>
 <label>Index pattern<input name="index_pattern" value="wazuh-alerts-*" required maxlength="128"></label>
 <label>Read-only username<input name="username" required maxlength="128" autocomplete="off"></label>
-<label>Password<input type="password" name="password" required autocomplete="new-password"><small>Protected by the signed-in Windows account. It will never be displayed after saving.</small></label>
+<label>Password<input type="password" name="password" required autocomplete="new-password"><small>Encrypted with the local application key. It will never be displayed after saving.</small></label>
 <label class="check-label"><input type="checkbox" name="verify_tls" value="1" checked> Verify TLS certificate</label>
 <button type="submit">Save disabled connection</button></form></section>
 <section class="panel"><div class="panel-heading"><div><p class="eyebrow">CONNECTORS</p><h2>Configured sources</h2></div><span>{{ connections|length }} total</span></div>
-<div class="connection-list">{% for item in connections %}<article><div><strong>{{ item.name }}</strong><span class="status-pill {{ 'active' if item.status == 'connected' else 'disabled' }}">{{ item.status|replace('_', ' ') }}</span><p>{{ connector_types[item.connector_type][0] }} · {{ item.display_endpoint }}</p><small>{{ item.index_pattern }} · user {{ item.username }} · TLS {{ 'verified' if item.verify_tls else 'not verified' }}</small>{% if item.last_error %}<p class="connector-error">{{ item.last_error }}</p>{% endif %}</div><dl><dt>Collection</dt><dd>{{ 'Enabled' if item.is_enabled else 'Disabled' }}</dd><dt>Response</dt><dd>{{ item.response_time_ms ~ ' ms' if item.response_time_ms is not none else 'Not measured' }}</dd><dt>Cluster</dt><dd>{{ item.cluster_health or 'Unknown' }}</dd><dt>Last success</dt><dd>{{ item.last_success_at or 'Never' }}</dd></dl><div class="row-actions"><a class="secondary" href="{{ url_for('auth.edit_siem_connection', connection_id=item.id) }}">Edit</a><form method="post" action="{{ url_for('auth.test_siem_connection', connection_id=item.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="secondary">Test connection</button></form><form method="post" action="{{ url_for('auth.toggle_siem_connection', connection_id=item.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">{{ 'Disconnect' if item.is_enabled else 'Enable collection' }}</button></form></div></article>{% else %}<p class="empty-state">No SIEM connection configured. Alerts remain paused.</p>{% endfor %}</div></section>
+<div class="connection-list">
+  {% for item in connections %}
+  <article>
+    <div>
+      <strong>{{ item.name }}</strong>
+      <span class="collection-pill state-{{ item.collection_status.state }}">{{ item.collection_status.label }}</span>
+      <p>{{ connector_types[item.connector_type][0] }} · {{ item.display_endpoint }}</p>
+      <small>{{ item.index_pattern }} · user {{ item.username }} · Certificate verification {{ 'enabled' if item.verify_tls else 'disabled' }}</small>
+      {% if item.last_error and item.status == 'error' %}<p class="connector-error">{{ item.last_error }}</p>{% endif %}
+    </div>
+    <dl>
+      <dt>Collection setting</dt><dd>{{ 'Enabled' if item.is_enabled else 'Disabled' }}</dd>
+      <dt>Last measured response</dt><dd>{{ item.response_time_ms ~ ' ms' if item.response_time_ms is not none else 'Not measured' }}</dd>
+      <dt>Last reported cluster health</dt><dd>{{ item.cluster_health or 'Unknown' }}</dd>
+      <dt>Last successful SIEM contact</dt><dd>{{ item.last_success_at|db_time('Never') }}</dd>
+      <dt>Last alert ingestion contact</dt><dd>{{ item.last_alert_at|db_time('No stored ingestion contact') }}</dd>
+    </dl>
+    <div class="row-actions">
+      <a class="secondary" href="{{ url_for('auth.edit_siem_connection', connection_id=item.id) }}">Edit</a>
+      <form method="post" action="{{ url_for('auth.test_siem_connection', connection_id=item.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="secondary">Test connection</button></form>
+      <form method="post" action="{{ url_for('auth.toggle_siem_connection', connection_id=item.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">{{ 'Disconnect' if item.is_enabled else 'Enable collection' }}</button></form>
+    </div>
+  </article>
+  {% else %}<p class="empty-state">No SIEM connection configured. Alert collection is disabled.</p>{% endfor %}
+</div></section>
 </div>
 {% endblock %}

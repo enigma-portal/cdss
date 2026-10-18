@@ -1,11 +1,17 @@
-"""Apply reviewed framework mappings to stored incident guidance."""
+"""Explicit maintenance of legacy guidance, not current contextual recommendations."""
+
+import argparse
 
 from app.database import get_db_connection
 from app.database.seed import seed_knowledge_base
 from app.services.recommendation_engine import rebuild_recommendations
 
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--confirm-legacy-rewrite', action='store_true')
+    if not parser.parse_args(argv).confirm_legacy_rewrite:
+        parser.error('Legacy guidance rewrite requires --confirm-legacy-rewrite; use the investigation workflow for current recommendations.')
     seed_knowledge_base()
     connection = get_db_connection()
     try:

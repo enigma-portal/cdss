@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block content %}
+<a class="back" href="{{ url_for('dashboard.incident_detail', incident_id=run.incident_id) }}">← Back to investigation case #{{ run.incident_id }}</a>
+<section class="panel detail-card analyst-section">
+  <p class="eyebrow">WAZUH ARCHIVE RETRIEVAL #{{ run.investigation_id }}</p>
+  <h1>Investigation Trigger</h1>
+  <dl class="summary-facts">
+    <div><dt>Grouped detection</dt><dd>{{ run.rule_description or 'Description not provided' }}{% if run.rule_id %} · Rule {{ run.rule_id }}{% endif %}</dd></div>
+    <div><dt>Reported system</dt><dd>{{ run.reported_system }}{% if run.reported_agent_name %} · {{ run.reported_agent_name }}{% endif %}</dd></div>
+    <div><dt>Reported agent ID</dt><dd>{{ run.reported_agent_id or 'Not provided' }}</dd></div>
+    <div><dt>Configured CDSS asset</dt><dd>{% if run.asset_name_snapshot %}{{ run.asset_name_snapshot }} · Criticality: {{ run.asset_criticality_snapshot|title }} · Assessment scope: {{ 'Included' if run.asset_protected_snapshot else 'Not included' }}{% else %}Not mapped · Criticality: Unavailable · Assessment scope: Unavailable{% endif %}</dd></div>
+    <div><dt>Stored alert occurrences</dt><dd>{{ run.group_occurrences }}</dd></div>
+    <div><dt>First / Last Seen</dt><dd>{{ run.first_seen|source_time('Unavailable') }} → {{ run.last_seen|source_time('Unavailable') }}</dd></div>
+  </dl>
+  <details><summary>Trigger pivots and member alert IDs</summary>
+    {% for name, value in run.pivots.items() %}<p><strong>{{ name|replace('_',' ')|title }}:</strong> {{ value|join(', ') if value is sequence and value is not string else value }}</p>{% endfor %}
+    <p><strong>CDSS alert IDs:</strong> {% for alert_id in run.trigger_alert_ids %}<a href="{{ url_for('dashboard.alert_detail', alert_id=alert_id) }}">{{ alert_id }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</p>
+  </details>
+  <p class="metadata">These values identify the retrieval trigger. They are not interpreted as a verdict.</p>
+</section>
+<section class="panel detail-card analyst-section" id="investigation-method">
+  <h2>Investigation Method</h2>
+  {% if run.playbook %}
+    <dl class="summary-facts">
+      <div><dt>Selected playbook</dt><dd>{{ run.playbook.name }}</dd></div>
+      <div><dt>Why selected</dt><dd>{{ run.selection_reason }}</dd></div>
+      <div><dt>Matched triggers</dt><dd>{{ run.matched_triggers|join(', ') if run.matched_triggers else 'No dedicated trigger matched' }}</dd></div>
+      <div><dt>Source</dt><dd>{{ run.playbook.provenance }}{% if run.playbook.source_ecosystem %} · {{ run.playbook.source_ecosystem }}{% endif %}</dd></div>
+    </dl>
+    <details><summary>? What does this playbook review?</summary>
+      <p>{{ run.playbook.help_text }}</p>
+      <p><strong>Evidence requested:</strong></p>
+      <ul>{% for need in run.playbook.evidence_requests %}<li>{{ need.label }} <small>({{ need.source_scope }})</small></li>{% endfor %}</ul>
+      <p><strong>Investigation questions:</strong></p>
+      <ul>{% for question in run.playbook.investigation_checks %}<li>{{ question }}</li>{% endfor %}</ul>
+      <p class="metadata">These are selected evidence checks. The case page shows evaluated findings and contextual assessment. Missing telemetry remains unavailable, not “not observed.”</p>
+      {% if run.playbook.source_url %}<p>Reference: <a href="{{ run.playbook.source_url }}" target="_blank" rel="noopener noreferrer">{{ run.playbook.source_title }}</a></p>{% endif %}
+      {% for title, url in run.playbook.additional_references %}<p>Reference: <a href="{{ url }}" target="_blank" rel="noopener noreferrer">{{ title }}</a></p>{% endfor %}
+      <p class="metadata">{{ run.playbook.adaptation_note }}</p>
+    </details>
+  {% else %}
+    <p>Playbook selection was not recorded for this earlier retrieval.</p>
+  {% endif %}
+</section>
+<section class="panel detail-card analyst-section" id="supporting-wazuh-evidence">
+  <h2>Supporting Wazuh Evidence</h2>
+  <dl class="summary-facts">
+    <div><dt>Evidence Window</dt><dd>{{ run.window_start|source_time('Unavailable') }} → {{ run.window_end|source_time('Unavailable') }}</dd></div>
+    <div><dt>Archive Events Retrieved</dt><dd>{{ run.retrieved_count if run.retrieval_status in ('available','empty') else 'Not Available' }}</dd></div>
+    <div><dt>Related activity on other reported systems</dt><dd>{{ run.cross_retrieved_count if run.cross_retrieval_status in ('available','empty') else 'Not Available' }}</dd></div>
+    <div><dt>Matching events reported by OpenSearch</dt><dd>{% if run.total_hits is not none %}{{ 'At least ' if run.total_hits_exact == 0 else '' }}{{ run.total_hits }}{% else %}Not reported{% endif %}</dd></div>
+    <div><dt>Results truncated</dt><dd>{{ 'Yes' if run.truncated else 'No' }}</dd></div>
+    <div><dt>Retrieval status</dt><dd>{{ run.retrieval_status|title }}</dd></div>
+    <div><dt>Other-system search</dt><dd>{{ run.cross_retrieval_status|title if run.cross_retrieval_status else 'Not Available' }}</dd></div>
+  </dl>
+  {% if run.retrieval_status == 'empty' %}<p>No supporting Wazuh archive events were found in the configured investigation window. This does not mean the activity was benign.</p>{% endif %}
+  {% if run.retrieval_status == 'unavailable' %}<p>Wazuh archive evidence is currently unavailable. No negative finding or low-risk conclusion is inferred.</p>{% endif %}
+  {% if run.retrieval_status == 'failed' %}<p>Archive evidence retrieval failed. The trigger was preserved, but no evidence was fabricated.</p>{% endif %}
+  {% if run.retrieval_status == 'running' %}<p>Archive evidence retrieval has not completed.</p>{% endif %}
+  {% if run.cross_truncated %}<p class="context-notice">Other-system evidence is partial: {{ run.cross_retrieved_count }} records retained{% if run.cross_total_hits is not none %} from at least {{ run.cross_total_hits }} matches{% endif %}. Missing activity cannot be ruled out.</p>{% endif %}
+  {% if run.truncated %}<p class="context-notice">Only the configured maximum number of events was retained. This is not the complete matching archive set.</p>{% endif %}
+  {% if run.evidence %}<ol class="archive-evidence-list">
+    {% for item in run.evidence %}<li>
+      <strong>{{ item.event_timestamp|source_time }} · {{ item.short_summary }}</strong>
+      {% if item.related_system %}<span>Related activity observed on another reported system; not a compromise finding.</span>{% endif %}
+      {% if item.selected_fields.username %}<span>Account: {{ item.selected_fields.username }}</span>{% endif %}
+      {% if item.selected_fields.source_ip %}<span>Network Source IP: {{ item.selected_fields.source_ip }}</span>{% endif %}
+      {% if item.selected_fields.process_name %}<span>Process: {{ item.selected_fields.process_name }}</span>{% endif %}
+      {% if item.selected_fields.destination_ip %}<span>Network Destination IP: {{ item.selected_fields.destination_ip }}</span>{% endif %}
+      <small>Wazuh Archive · {{ item.source_index }} · Document {{ item.source_document_id }} · Agent {{ item.agent_id }}</small>
+      <details><summary>Technical details</summary>
+        <dl class="source-facts">
+          {% for name, value in item.selected_fields.items() %}<dt>{{ name|replace('_',' ')|title }}</dt><dd>{{ value }}</dd>{% endfor %}
+        </dl>
+      </details>
+    </li>{% endfor %}
+  </ol>{% endif %}
+  <p class="metadata">Actual retrieved records are available to the next investigation run. Their source categories and verified relationships, not mere availability, determine whether they support findings.</p>
+</section>
+{% endblock %}

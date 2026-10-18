@@ -233,14 +233,18 @@ def seed_knowledge_base():
             ).fetchone()["id"]
 
             for technique in TECHNIQUES:
+                # Starter labels must not replace a subsequently synchronized
+                # official catalogue entry. Legacy weights/actions stay separate.
                 connection.execute("""
                     INSERT INTO mitre_techniques
-                        (technique_id, technique_name, tactic, source_id)
-                    VALUES (?, ?, ?, ?)
+                        (technique_id, technique_name, tactic, source_id, catalogue_source)
+                    VALUES (?, ?, ?, ?, 'project_seed')
                     ON CONFLICT(technique_id) DO UPDATE SET
                         technique_name = excluded.technique_name,
                         tactic = excluded.tactic,
-                        source_id = excluded.source_id
+                        source_id = excluded.source_id,
+                        catalogue_source = excluded.catalogue_source
+                    WHERE mitre_techniques.catalogue_source != 'taxii'
                 """, (technique["id"], technique["name"], technique["tactic"], source_id))
                 connection.execute("""
                     INSERT INTO knowledge_base

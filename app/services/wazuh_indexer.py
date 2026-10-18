@@ -2,7 +2,9 @@
 
 import base64
 import json
+import math
 import os
+import re
 import ssl
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
@@ -136,6 +138,8 @@ class WazuhIndexerClient:
         hits = response["hits"].get("hits")
         if not isinstance(hits, list) or not all(isinstance(hit, dict) for hit in hits):
             raise WazuhIndexerError("SIEM returned malformed JSON: alert hits must be a list.")
+        if any(not isinstance(hit.get('_source'), dict) for hit in hits):
+            raise WazuhIndexerError("SIEM returned malformed JSON: alert source must be an object.")
         return hits
 
     def fetch_alert_page(self, size=100, search_after=None):
@@ -155,18 +159,28 @@ class WazuhIndexerClient:
         }
         if search_after:
             if (not isinstance(search_after, (list, tuple)) or len(search_after) != 2
-                    or not all(isinstance(item, str) for item in search_after)):
+                    or type(search_after[0]) not in (str, int, float)
+                    or search_after[0] == ''
+                    or (type(search_after[0]) is float and not math.isfinite(search_after[0]))
+                    or not isinstance(search_after[1], str) or not search_after[1]):
                 raise ValueError("search_after cursor must contain timestamp and document ID.")
             payload["search_after"] = list(search_after)
         safe_index = quote(self.index_name, safe="*,-")
         response = self._request_json("POST", f"/{safe_index}/_search", payload)
         hits = self._validated_hits(response)
+        # Validate the complete page before returning anything that can advance
+        # the persisted cursor; never silently skip a malformed source document.
+        for hit in hits:
+            sort = hit.get('sort')
+            if (not isinstance(sort, (list, tuple)) or len(sort) != 2
+                    or type(sort[0]) not in (str, int, float) or sort[0] == ''
+                    or (type(sort[0]) is float and not math.isfinite(sort[0]))
+                    or not isinstance(sort[1], str) or not sort[1]):
+                raise WazuhIndexerError("SIEM returned an invalid ingestion cursor.")
         alerts = []
         ordered_hits = list(reversed(hits)) if bootstrap_latest else hits
         for hit in ordered_hits:
             source = hit.get("_source")
-            if not isinstance(source, dict):
-                continue
             alert = dict(source)
             alert.setdefault("id", hit.get("_id"))
             alerts.append(alert)
@@ -179,3 +193,23 @@ class WazuhIndexerClient:
     def check_connection(self):
         """Return the Indexer health result without changing any server data."""
         return self._request_json("GET", "/_cluster/health")
+
+    def field_capabilities(self, fields):
+        """Discover actual mapped fields for this client's configured index."""
+        if (not fields or not all(isinstance(field, str) and
+                re.fullmatch(r"[@A-Za-z_][@A-Za-z0-9_.]*", field) for field in fields)):
+            raise ValueError("Archive field names must be a bounded list of safe names.")
+        safe_index = quote(self.index_name, safe="*,-")
+        safe_fields = quote(",".join(fields), safe=",.@_")
+        return self._request_json(
+            "GET", f"/{safe_index}/_field_caps?fields={safe_fields}&ignore_unavailable=false&include_unmapped=true"
+        )
+
+    def search_documents(self, payload):
+        """Read an explicitly bounded, source-filtered search on this index."""
+        if (not isinstance(payload, dict) or type(payload.get("size")) is not int
+                or not 1 <= payload["size"] <= 1000 or not isinstance(payload.get("_source"), list)
+                or not payload["_source"]):
+            raise ValueError("Archive search needs a bounded size and source-field allowlist.")
+        safe_index = quote(self.index_name, safe="*,-")
+        return self._request_json("POST", f"/{safe_index}/_search", payload)

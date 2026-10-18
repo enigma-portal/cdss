@@ -3,6 +3,7 @@
 import json
 
 from app.services.classification import classify
+from app.services.mitre_mapping import source_techniques
 
 
 def _risk_band(score):
@@ -139,6 +140,7 @@ def backfill_recommendations(connection):
     rows = connection.execute("""
         SELECT i.id, i.classification_source, i.classification_label,
                a.rule_description, a.rule_groups, a.username, a.source_ip, a.agent_name, a.agent_ip,
+               a.raw_alert, a.wazuh_mitre_ids,
                COALESCE(rs.final_risk_score, 0) AS risk_score
         FROM incidents i JOIN alerts a ON a.id = i.alert_id
         LEFT JOIN risk_scores rs ON rs.incident_id = i.id
@@ -146,10 +148,9 @@ def backfill_recommendations(connection):
         ORDER BY i.id
     """).fetchall()
     for row in rows:
-        techniques = tuple(item["technique_id"] for item in connection.execute("""
-            SELECT technique_id FROM incident_mitre_techniques
-            WHERE incident_id = ? ORDER BY ordinal, technique_id
-        """, (row["id"],)).fetchall())
+        # Contextual supplementary mappings must not alter legacy guidance when
+        # an administrator rebuilds it. Preserve the original source-only input.
+        techniques, _ = source_techniques(row["raw_alert"], row["wazuh_mitre_ids"])
         try:
             groups = tuple(json.loads(row["rule_groups"] or "[]"))
         except (TypeError, ValueError, json.JSONDecodeError):

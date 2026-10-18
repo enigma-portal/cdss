@@ -1,0 +1,19 @@
+{
+  "synthetic_test_data": true,
+  "authentication": [
+    {"id": "pb-auth-fail-1", "timestamp": "2026-10-09T08:00:00Z", "agent": {"id": "001", "name": "WIN-001"}, "rule": {"id": "pb-4625", "description": "Windows logon failed", "level": 5, "groups": ["windows", "windows_security", "authentication_failed"]}, "data": {"srcip": "192.0.2.10", "srcuser": "analyst", "win": {"system": {"eventID": "4625"}}}},
+    {"id": "pb-auth-fail-2", "timestamp": "2026-10-09T08:01:00Z", "agent": {"id": "001", "name": "WIN-001"}, "rule": {"id": "pb-4625", "description": "Windows logon failed", "level": 5, "groups": ["windows", "windows_security", "authentication_failed"]}, "data": {"srcip": "192.0.2.10", "srcuser": "analyst", "win": {"system": {"eventID": "4625"}}}},
+    {"id": "pb-auth-success", "timestamp": "2026-10-09T08:03:00Z", "agent": {"id": "001", "name": "WIN-001"}, "rule": {"id": "pb-4624", "description": "Windows logon succeeded", "level": 3, "groups": ["windows", "windows_security", "authentication_success"]}, "data": {"srcip": "192.0.2.10", "srcuser": "analyst", "win": {"system": {"eventID": "4624"}}}}
+  ],
+  "file_process": [
+    {"id": "pb-file", "timestamp": "2026-10-09T09:00:00Z", "agent": {"id": "001", "name": "WIN-001"}, "rule": {"id": "pb-sysmon-11", "description": "File creation reported", "level": 6, "groups": ["windows", "sysmon", "sysmon_eid11_detections"], "mitre": {"id": ["T1105"]}}, "data": {"win": {"system": {"eventID": "11"}, "eventdata": {"image": "C:\\Windows\\System32\\cmd.exe", "targetFilename": "C:\\Temp\\sample.bin", "user": "LAB\\analyst"}}}},
+    {"id": "pb-process", "timestamp": "2026-10-09T09:01:00Z", "agent": {"id": "001", "name": "WIN-001"}, "rule": {"id": "pb-sysmon-1", "description": "Process creation reported", "level": 6, "groups": ["windows", "sysmon", "sysmon_eid1_detections"], "mitre": {"id": ["T1059"]}}, "data": {"win": {"system": {"eventID": "1"}, "eventdata": {"image": "C:\\Windows\\System32\\cmd.exe", "parentImage": "C:\\Windows\\explorer.exe", "commandLine": "cmd.exe /c whoami", "user": "LAB\\analyst"}}}}
+  ],
+  "remote_access": [
+    {"id": "pb-remote-agent-1", "timestamp": "2026-10-09T10:00:00Z", "agent": {"id": "001", "name": "WIN-001"}, "rule": {"id": "pb-rdp", "description": "Remote desktop logon reported", "level": 6, "groups": ["windows", "windows_security", "authentication_success"], "mitre": {"id": ["T1021.001"]}}, "data": {"srcip": "192.0.2.20", "dstip": "198.51.100.11", "srcuser": "operator", "win": {"system": {"eventID": "4624"}}}},
+    {"id": "pb-remote-agent-2", "timestamp": "2026-10-09T10:02:00Z", "agent": {"id": "002", "name": "WIN-002"}, "rule": {"id": "pb-rdp", "description": "Remote desktop logon reported", "level": 6, "groups": ["windows", "windows_security", "authentication_success"], "mitre": {"id": ["T1021.001"]}}, "data": {"srcip": "192.0.2.20", "dstip": "198.51.100.12", "srcuser": "operator", "win": {"system": {"eventID": "4624"}}}}
+  ],
+  "fallback": [
+    {"id": "pb-generic", "timestamp": "2026-10-09T11:00:00Z", "agent": {"id": "001", "name": "WIN-001"}, "rule": {"id": "pb-system-error", "description": "Windows System error event", "level": 5, "groups": ["windows", "windows_system", "system_error"]}, "data": {"win": {"system": {"eventID": "10010"}}}}
+  ]
+}

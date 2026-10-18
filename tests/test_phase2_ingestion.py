@@ -124,7 +124,7 @@ class PhaseTwoIngestionTests(unittest.TestCase):
         with patch("app.services.poller.unprotect_secret", return_value="secret"), \
              patch("app.services.poller.create_connector", return_value=connector):
             _poll_once(10, 0); _poll_once(10, 0)
-        self.assertEqual(connector.calls, [None, ("2026-09-20T10:00:00Z", "doc-a")])
+        self.assertEqual(connector.calls, [None, ["2026-09-20T10:00:00Z", "doc-a"]])
         connection = get_db_connection()
         cursor = connection.execute("SELECT event_timestamp,document_id FROM ingestion_cursors WHERE connection_id=?", (connector_id,)).fetchone()
         connection.close(); self.assertEqual(tuple(cursor), ("2026-09-20T10:00:00Z", "doc-a"))

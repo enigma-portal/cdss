@@ -17,3 +17,10 @@ data/*.lock
 .flaskenv
 .vscode/
 .idea/
+
+# Sensitive local material must never enter a source export or new Git commit.
+credentials/
+*.pem
+*.p12
+*.pfx
+*.secret

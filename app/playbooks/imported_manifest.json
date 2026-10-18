@@ -1,0 +1,49 @@
+{
+  "schema_version": "cdss-playbook-import-v1",
+  "artifacts": {
+    "authentication_review_v1": {
+      "source_ecosystem": "Cortex XSOAR public content",
+      "source_title": "Brute Force Investigation - Generic",
+      "source_path": "Packs/BruteForce/Playbooks/Brute_Force_Investigation_-_Generic_6_5.yml",
+      "source_url": "https://github.com/demisto/content/blob/master/Packs/BruteForce/Playbooks/Brute_Force_Investigation_-_Generic_6_5.yml",
+      "source_sha256": "9a450377fd655e6c5b33fb64246252ef39d4f4392f0204de535e40f3f328447d",
+      "check_keys": ["auth_events", "account_source", "time_sequence"],
+      "steps": [
+        {"source_step": "Ask user to confirm login attempts", "mapped_implementation": "Present related logon observations for analyst validation", "supported": true},
+        {"source_step": "Was there a successful login?", "mapped_implementation": "Check timestamped, entity-related failure/success evidence", "supported": true},
+        {"source_step": "Active Directory - disable account", "mapped_implementation": null, "supported": false},
+        {"source_step": "Isolate Endpoint - Generic V2", "mapped_implementation": null, "supported": false}
+      ]
+    },
+    "file_process_review_v1": {
+      "source_ecosystem": "Cortex XSOAR public content",
+      "source_title": "Local Analysis alert Investigation",
+      "source_path": "Packs/Core/Playbooks/playbook-Local_Analysis_alert_Investigation.yml",
+      "source_url": "https://github.com/demisto/content/blob/master/Packs/Core/Playbooks/playbook-Local_Analysis_alert_Investigation.yml",
+      "source_sha256": "98d5cb822ab0f4fae3abbbdba2ae3ba1056ab4c1e9ea6d41bc75f12dc924b008",
+      "check_keys": ["file_artifact", "process_chain", "related_network"],
+      "steps": [
+        {"source_step": "Retrieve the suspected file", "mapped_implementation": "Review reported file path and hash fields without copying the file", "supported": true},
+        {"source_step": "Check hash execution timestamp", "mapped_implementation": "Review timestamped file/process observations", "supported": true},
+        {"source_step": "Endpoint Investigation Plan", "mapped_implementation": "Inspect related process and network evidence", "supported": true},
+        {"source_step": "Wildfire Detonate and Analyze File", "mapped_implementation": null, "supported": false},
+        {"source_step": "Is auto-containment set to true?", "mapped_implementation": null, "supported": false}
+      ]
+    },
+    "remote_access_review_v1": {
+      "source_ecosystem": "Cortex XSOAR public content",
+      "source_title": "Possible External RDP Brute-Force",
+      "source_path": "Packs/Core/Playbooks/playbook-Possible_External_RDP_Brute-Force.yml",
+      "source_url": "https://github.com/demisto/content/blob/master/Packs/Core/Playbooks/playbook-Possible_External_RDP_Brute-Force.yml",
+      "source_sha256": "c474b1fde36217add591585bf473128c1f3eb2640c52c542faf9d3c4bc3ecf69",
+      "check_keys": ["remote_service", "remote_entities", "cross_host"],
+      "steps": [
+        {"source_step": "Investigation", "mapped_implementation": "Review observed remote-service authentication context", "supported": true},
+        {"source_step": "User Investigation - Generic", "mapped_implementation": "Review account and source across bounded evidence", "supported": true},
+        {"source_step": "Has related Indicators to hunt?", "mapped_implementation": "Search other reported agents using observed source and account pivots", "supported": true},
+        {"source_step": "Block Indicators", "mapped_implementation": null, "supported": false},
+        {"source_step": "Isolate Endpoint", "mapped_implementation": null, "supported": false}
+      ]
+    }
+  }
+}

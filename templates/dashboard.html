@@ -1,48 +1,21 @@
 {% extends "base.html" %}
+{% from "triage_table.html" import triage_table %}
 {% block content %}
-<section class="summary" aria-label="Incident summary">
-  <article><span>Total incidents</span><strong>{{ totals.total }}</strong></article>
-  <article class="critical"><span>Critical</span><strong>{{ totals.critical }}</strong></article>
-  <article class="high"><span>High</span><strong>{{ totals.high }}</strong></article>
-  <article><span>Open</span><strong>{{ totals.open }}</strong></article>
-</section>
 
-<section class="panel">
-  <div class="panel-heading">
-    <div><p class="eyebrow">DECISION QUEUE</p><h2>Security incidents</h2></div>
-    <div class="filter-state"><span>{{ pagination.active_label }}</span><p>{{ pagination.total }} matching</p></div>
-  </div>
-  <form class="filters" method="get" action="{{ url_for('dashboard.incidents') }}">
-    <label>Search<input name="q" value="{{ pagination.q }}" maxlength="100" placeholder="Rule, agent, source IP…"></label>
-    <label>Severity<select name="severity">
-      <option value="">All severities</option>
-      {% for level in ('critical', 'high', 'medium', 'low') %}
-      <option value="{{ level }}" {% if pagination.severity == level %}selected{% endif %}>{{ level|title }}</option>
-      {% endfor %}
-    </select></label>
-    <button type="submit">Apply filters</button>
-    {% if pagination.q or pagination.severity or pagination.view %}<a class="clear" href="{{ url_for('dashboard.incidents') }}">Clear</a>{% endif %}
-    {% if pagination.view %}<input type="hidden" name="view" value="{{ pagination.view }}">{% endif %}
-  </form>
-
-  {% if incidents %}<div class="table-wrap"><table>
-    <thead><tr><th>Decision</th><th>Incident</th><th>Context</th><th>Risk</th><th></th></tr></thead>
-    <tbody>{% for incident in incidents %}<tr>
-      <td><span class="badge {{ incident.severity_label }}">{{ incident.severity_label }}</span><span class="priority">{{ incident.priority }}</span></td>
-      <td><a class="incident-link" href="{{ url_for('dashboard.incident_detail', incident_id=incident.id) }}">{{ incident.title }}</a><small>#{{ incident.id }} · Rule {{ incident.rule_id }}</small></td>
-      <td><span>{{ incident.agent_name or 'Unknown agent' }}</span><small>{{ incident.source_ip or incident.detected_at }}</small></td>
-      <td><strong>{{ "%.2f"|format(incident.final_risk_score or 0) }}</strong><small>/ 10</small></td>
-      <td><a class="view" href="{{ url_for('dashboard.incident_detail', incident_id=incident.id) }}">View →</a></td>
-    </tr>{% endfor %}</tbody>
-  </table></div>
-  <nav class="pagination" aria-label="Incident pages">
-    {% if pagination.page > 1 %}<a href="{{ url_for('dashboard.incidents', page=pagination.page-1, q=pagination.q, severity=pagination.severity, view=pagination.view) }}">← Previous</a>{% endif %}
-    {% if pagination.page_numbers[0] > 1 %}<a href="{{ url_for('dashboard.incidents', page=1, q=pagination.q, severity=pagination.severity, view=pagination.view) }}">1</a>{% if pagination.page_numbers[0] > 2 %}<span>…</span>{% endif %}{% endif %}
-    {% for number in pagination.page_numbers %}{% if number == pagination.page %}<span class="current-page" aria-current="page">{{ number }}</span>{% else %}<a href="{{ url_for('dashboard.incidents', page=number, q=pagination.q, severity=pagination.severity, view=pagination.view) }}">{{ number }}</a>{% endif %}{% endfor %}
-    {% if pagination.page_numbers[-1] < pagination.pages %}{% if pagination.page_numbers[-1] < pagination.pages - 1 %}<span>…</span>{% endif %}<a href="{{ url_for('dashboard.incidents', page=pagination.pages, q=pagination.q, severity=pagination.severity, view=pagination.view) }}">{{ pagination.pages }}</a>{% endif %}
-    {% if pagination.page < pagination.pages %}<a href="{{ url_for('dashboard.incidents', page=pagination.page+1, q=pagination.q, severity=pagination.severity, view=pagination.view) }}">Next →</a>{% endif %}
-    <form class="page-jump" method="get" action="{{ url_for('dashboard.incidents') }}"><label for="page-jump">Go to page</label><input id="page-jump" name="page" type="number" min="1" max="{{ pagination.pages }}" value="{{ pagination.page }}" required><input type="hidden" name="q" value="{{ pagination.q }}"><input type="hidden" name="severity" value="{{ pagination.severity }}"><input type="hidden" name="view" value="{{ pagination.view }}"><button type="submit">Go</button></form>
-  </nav>
-  {% else %}<div class="empty-state"><h3>No matching incidents</h3><p>Change the filters or wait for the SIEM connector to collect new events.</p></div>{% endif %}
+<section class="panel"><div class="panel-heading"><div><p class="eyebrow">CONTEXTUAL TRIAGE</p><h2>Investigation cases</h2><p>Wazuh detections are listed separately under <a href="{{ url_for('dashboard.alerts') }}">Alerts</a>.</p></div><div class="filter-state"><span>{{ pagination.active_label }}</span><p>{{ pagination.total }} matching</p></div></div>
+<details class="detail-card" open><summary>Filter investigations</summary><form class="filters contextual-filters" method="get" action="{{ url_for('dashboard.incidents') }}">
+<label>Search<input name="q" value="{{ pagination.q }}" maxlength="100" placeholder="Incident, asset, rule, account…"></label>
+{% for key,label,options in [('severity','CDSS contextual risk',['critical','high','medium','low','unassessed']),('status','Case status',['open','investigating','contained','closed']),('criticality','Current asset criticality',['low','medium','high','critical','unmapped']),('evidence','Evidence state',['T1','T2','T3','T4','Inconclusive']),('decision','Latest recorded decision',['accept','reject','further_investigation_required','pending']),('confidence','Assessment confidence',['low','medium','high','unavailable'])] %}
+{% if loop.index==3 %}<details class="advanced-filters" {% if pagination.criticality or pagination.evidence or pagination.decision or pagination.confidence %}open{% endif %}><summary>More filters</summary><div class="filters contextual-filters">{% endif %}
+<label>{{ label }}<select name="{{ key }}"><option value="">All</option>{% for option in options %}<option value="{{ option }}" {% if pagination[key]==option %}selected{% endif %}>{{ option|replace('_',' ') }}</option>{% endfor %}</select></label>{% endfor %}</div></details>
+{% if pagination.view %}<input type="hidden" name="view" value="{{ pagination.view }}">{% endif %}
+<button type="submit">Apply filters</button><a class="clear" href="{{ url_for('dashboard.incidents') }}">Clear</a></form></details>
+{% if incidents %}{{ triage_table(incidents) }}
+<nav class="pagination" aria-label="Incident pages">
+{% if pagination.page>1 %}<a href="{{ url_for('dashboard.incidents',page=pagination.page-1,**filter_values) }}">← Previous</a>{% endif %}
+{% for number in pagination.page_numbers %}{% if number==pagination.page %}<span class="current-page" aria-current="page">{{ number }}</span>{% else %}<a href="{{ url_for('dashboard.incidents',page=number,**filter_values) }}">{{ number }}</a>{% endif %}{% endfor %}
+{% if pagination.page<pagination.pages %}<a href="{{ url_for('dashboard.incidents',page=pagination.page+1,**filter_values) }}">Next →</a>{% endif %}
+<form class="page-jump" method="get"><label for="page-jump">Go to page</label><input id="page-jump" name="page" type="number" min="1" max="{{ pagination.pages }}" value="{{ pagination.page }}" required>{% for key,value in filter_values.items() %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}<button type="submit">Go</button></form>
+</nav>{% else %}<div class="empty-state"><h3>No matching investigation cases</h3><p>Adjust the filters or review SIEM collection settings.</p></div>{% endif %}
 </section>
 {% endblock %}

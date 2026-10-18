@@ -47,6 +47,13 @@ class DashboardTests(unittest.TestCase):
                 VALUES (?, ?, 'open', ?, '2026-08-21T12:00:00Z', ?)
             """, (alert.lastrowid, title, label,
                     {"critical": "P1", "high": "P2", "medium": "P3", "low": "P4"}[label]))
+            # Phase 8 filters contextual assessments, not the legacy severity label.
+            connection.execute("INSERT INTO incident_alerts(incident_id,alert_id,correlation_reason,ordinal) VALUES(?,?,'test fixture',0)",(incident.lastrowid,alert.lastrowid))
+            investigation=connection.execute("INSERT INTO investigations(incident_id,playbook_key,status) VALUES(?,'test fixture','completed')",(incident.lastrowid,)).lastrowid
+            connection.execute('''INSERT INTO risk_assessments(incident_id,investigation_id,assessment_stage,
+                evidence_state,asset_criticality_snapshot,risk_level,confidence,rationale,methodology_version,inputs_snapshot)
+                VALUES(?,?,'contextual','T2','high',?,'high','Test fixture','test','{}')''',
+                (incident.lastrowid,investigation,label))
         connection.close()
         self.alert_ids.append(alert.lastrowid)
         self.incident_ids.append(incident.lastrowid)
@@ -61,14 +68,15 @@ class DashboardTests(unittest.TestCase):
     def test_dashboard_loads(self):
         response = self.authenticated_client().get("/")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Infrastructure overview", response.data)
-        self.assertIn(b"Vulnerability coverage", response.data)
-        self.assertIn(b"view=actionable", response.data)
+        self.assertIn(b"SOC overview", response.data)
+        self.assertIn(b"Wazuh alert activity", response.data)
+        self.assertIn(b"Investigation activity", response.data)
+        self.assertIn(b"view=active_high", response.data)
         self.assertIn(b"severity=critical", response.data)
-        self.assertGreaterEqual(response.data.count(b'class="help-tip'), 9)
+        self.assertEqual(response.data.count(b'class="help-tip'), 8)
         incidents = self.authenticated_client().get("/incidents")
         self.assertEqual(incidents.status_code, 200)
-        self.assertIn(b"Security incidents", incidents.data)
+        self.assertIn(b"Investigation cases", incidents.data)
         self.assertEqual(response.headers["X-Frame-Options"], "DENY")
 
     def test_dashboard_limits_invalid_filter_and_has_detail_route(self):

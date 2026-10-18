@@ -6,7 +6,7 @@ from flask import Blueprint, abort, flash, redirect, render_template, request, u
 
 from app.auth import admin_required, validate_csrf
 from app.database import get_db_connection
-from app.services.asset_resolver import backfill_asset_links
+from app.services.asset_resolver import backfill_asset_links, observed_agent_context
 from app.services.asset_validation import ASSET_CATALOGUE, CRITICALITIES, validate_asset
 
 assets = Blueprint("assets", __name__)
@@ -41,7 +41,7 @@ def index():
                    (SELECT COUNT(*) FROM alerts WHERE alerts.asset_id = assets.id) AS alert_count
               FROM assets ORDER BY asset_name COLLATE NOCASE, id
         """).fetchall()
-        return render_template("assets.html", assets=rows, catalogue=ASSET_CATALOGUE,
+        return render_template("assets.html", assets=rows, observed_agents=observed_agent_context(connection), catalogue=ASSET_CATALOGUE,
                                criticalities=CRITICALITIES)
     finally:
         connection.close()

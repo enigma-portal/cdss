@@ -10,6 +10,40 @@ from app.services.wazuh_indexer import WazuhIndexerClient, WazuhIndexerError
 
 
 class WazuhIndexerClientTests(unittest.TestCase):
+    def test_archive_field_discovery_uses_configured_index(self):
+        client = WazuhIndexerClient('https://indexer.example', 'reader', 'secret',
+                                    index_name='wazuh-archives-*')
+        with patch.object(client, '_request_json', return_value={'fields': {}}) as request:
+            self.assertEqual(client.field_capabilities(['timestamp', '@timestamp', 'agent.id']),
+                             {'fields': {}})
+        self.assertEqual(request.call_args.args[0], 'GET')
+        self.assertIn('/wazuh-archives-*/_field_caps?', request.call_args.args[1])
+        self.assertIn('include_unmapped=true', request.call_args.args[1])
+        with self.assertRaises(ValueError):
+            client.field_capabilities(['agent.id&size=10000'])
+
+    def test_archive_search_requires_bounded_source_filtered_request(self):
+        client = WazuhIndexerClient('https://indexer.example', 'reader', 'secret',
+                                    index_name='wazuh-archives-*')
+        payload = {'size': 200, '_source': ['timestamp', 'agent.id'],
+                   'query': {'bool': {'filter': []}}}
+        with patch.object(client, '_request_json', return_value={'hits': {'hits': []}}) as request:
+            client.search_documents(payload)
+        self.assertEqual(request.call_args.args,
+                         ('POST', '/wazuh-archives-*/_search', payload))
+        with self.assertRaises(ValueError):
+            client.search_documents({'size': 1001, '_source': ['timestamp']})
+        with self.assertRaises(ValueError):
+            client.search_documents({'size': 200, '_source': []})
+
+    def test_missing_or_malformed_page_sort_is_rejected(self):
+        client = WazuhIndexerClient('https://indexer.example', 'reader', 'secret')
+        for sort in (None, [], 1, ['time'], [None,'doc'], ['time',None], ['', 'doc']):
+            with self.subTest(sort=sort), patch.object(client,'_request_json',return_value={
+                    'hits':{'hits':[{'_source':{},'sort':sort}]}}):
+                with self.assertRaisesRegex(WazuhIndexerError,'invalid ingestion cursor'):
+                    client.fetch_alert_page()
+
     def test_fetch_alerts_returns_wazuh_sources(self):
         response = MagicMock()
         response.read.return_value = json.dumps({
@@ -57,6 +91,23 @@ class WazuhIndexerClientTests(unittest.TestCase):
         self.assertEqual(body["sort"][0]["timestamp"]["order"], "asc")
         self.assertEqual(events[0]["id"], "doc-2")
         self.assertEqual(cursor, ("2026-08-24T10:00:01Z", "doc-2"))
+
+    def test_numeric_sort_value_keeps_its_opensearch_type(self):
+        response = MagicMock()
+        response.read.return_value = json.dumps({"hits": {"hits": [{
+            "_id": "doc-2", "_source": {"timestamp": "2026-08-24T10:00:01Z"},
+            "sort": [1787565601000, "doc-2"],
+        }]}}).encode("utf-8")
+        context_manager = MagicMock()
+        context_manager.__enter__.return_value = response
+        client = WazuhIndexerClient("https://indexer.example", "reader", "secret")
+        with patch("app.services.wazuh_indexer._open_no_redirect", return_value=context_manager) as opened:
+            _, cursor = client.fetch_alert_page(size=10,
+                search_after=(1787565600000, "doc-1"))
+        body = json.loads(opened.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(body["search_after"], [1787565600000, "doc-1"])
+        self.assertIs(type(body["search_after"][0]), int)
+        self.assertEqual(cursor, (1787565601000, "doc-2"))
 
     def test_first_page_bootstraps_from_latest_batch(self):
         response = MagicMock()

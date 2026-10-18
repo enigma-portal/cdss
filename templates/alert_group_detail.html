@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block content %}
+<a class="back" href="{{ url_for('dashboard.alerts') }}">← Back to grouped alerts</a>
+<section class="panel detail-card analyst-section">
+  <p class="eyebrow">{{ 'EXISTING INVESTIGATION CASE ALERT SET' if group.existing_case_membership else 'GROUPED WAZUH DETECTION' }}</p>
+  <h1>Alert Summary</h1>
+  <h2 class="incident-title">{{ group.rule_description or 'Description not provided' }}</h2>
+  {% if group.existing_case_membership %}<p class="metadata">These alerts remain linked to an existing case for audit. They may describe different artifacts; the count is not a count of identical events.</p>{% endif %}
+  <dl class="summary-facts">
+    <div><dt>{{ 'CDSS Initial Priority at case opening' if group.existing_case_membership else 'CDSS Initial Alert Priority' }}</dt><dd><strong>{{ group.initial_priority.level or 'Not assessed' }}</strong></dd></div>
+    <div><dt>Wazuh Detection Level</dt><dd><strong>{{ group.rule_level if group.rule_level is not none else 'Not provided' }}</strong></dd></div>
+    <div><dt>Wazuh rule ID</dt><dd>{{ group.rule_id or 'Not provided' }}</dd></div>
+    <div><dt>MITRE ATT&amp;CK IDs</dt><dd>{{ group.mitre_ids|join(', ') if group.mitre_ids else 'Not Mapped' }}</dd></div>
+    <div><dt>Investigation status</dt><dd>{{ group.investigation_status }}</dd></div>
+  </dl>
+  <p class="metadata">{{ group.initial_priority.rationale }} This is triage priority, not final contextual risk or a compromise verdict.{% if group.existing_case_membership %} The saved priority reflects the grouping in effect when the case was opened; it is not recalculated from today's artifact grouping.{% endif %}</p>
+</section>
+<div class="source-asset-grid">
+  <section class="panel detail-card analyst-section">
+    <h2>Reported Wazuh Source</h2>
+    <dl class="source-facts">
+      <dt>Reported system</dt><dd>{{ group.reported_system }}</dd>
+      <dt>Agent Name</dt><dd>{{ group.agent_name or 'Not provided' }}</dd>
+      <dt>Wazuh Agent ID</dt><dd>{{ group.agent_id or 'Not provided' }}</dd>
+      <dt>Monitored Endpoint IP</dt><dd>{{ group.agent_ip or 'Not provided' }}</dd>
+    </dl>
+  </section>
+  <section class="panel detail-card analyst-section">
+    <h2>Configured CDSS Asset</h2>
+    {% if group.asset_name %}<dl class="source-facts">
+      <dt>Asset</dt><dd>{{ group.asset_name }}</dd>
+      <dt>Administrator-defined criticality</dt><dd>{{ group.criticality|title }}</dd>
+      <dt>Contextual assessment scope</dt><dd>{{ 'Included' if group.is_protected else 'Not included' }}</dd>
+    </dl>{% else %}<dl class="source-facts"><dt>Asset</dt><dd>Not mapped</dd><dt>Asset criticality</dt><dd>Unavailable</dd><dt>Contextual assessment scope</dt><dd>Unavailable — administrator configuration required</dd></dl><p>Unassessed because no mapped asset/criticality/assessment scope is available.</p>{% endif %}
+  </section>
+</div>
+<section class="panel detail-card analyst-section"><h2>Event Network Context</h2><dl class="summary-facts">{% for field,label in [('source_ip','Network Source IP'),('destination_ip','Network Destination IP'),('username','Account')] %}{% set values=group.members|map(attribute=field)|select|unique|list %}<div><dt>{{ label }}</dt><dd>{{ values|join(', ') if values else 'Not present in this event evidence.' }}</dd></div>{% endfor %}</dl></section>
+<section class="panel detail-card analyst-section">
+  <h2>Occurrence Summary</h2>
+  <dl class="summary-facts">
+    <div><dt>{{ 'Alerts in existing case' if group.existing_case_membership else 'Occurrences' }}</dt><dd>{{ group.occurrences }} stored Wazuh alerts</dd></div>
+    <div><dt>First Seen</dt><dd>{{ group.first_seen|source_time }}</dd></div>
+    <div><dt>Last Seen</dt><dd>{{ group.last_seen|source_time }}</dd></div>
+  </dl>
+</section>
+<section class="panel detail-card analyst-section">
+  <h2>Investigation</h2>
+  <p>Reviewing this alert does not start an investigation. Investigate opens the grouped case, collects available supporting evidence, runs the selected evidence checks, and prepares an analyst-reviewed contextual assessment.</p>
+  {% if group.active_case_id %}
+  <p><a class="button secondary" href="{{ url_for('dashboard.incident_detail', incident_id=group.active_case_id) }}">Open Investigation</a></p>
+  {% else %}<form method="post" action="{{ url_for('dashboard.investigate_group', alert_id=group.representative_alert_id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="button secondary" type="submit">Investigate</button>
+  </form>{% endif %}
+</section>
+<section class="panel detail-card analyst-section">
+  <details>
+    <summary>Occurrence History ({{ group.occurrences }})</summary>
+    <p>Each row is an unchanged, individually stored Wazuh alert. Times use your browser’s timezone when available; otherwise UTC. Original source timestamps remain in the stored Wazuh records.</p>
+    <div class="table-wrap"><table class="context-table occurrence-table">
+      <thead><tr><th>Event time</th><th>Wazuh alert ID</th>{% if group.has_source_ip %}<th>Network Source IP</th>{% endif %}{% if group.has_username %}<th>Account</th>{% endif %}{% if group.has_destination_ip %}<th>Network Destination IP</th>{% endif %}<th>Linked case</th></tr></thead>
+      <tbody>{% for member in group.members %}<tr>
+        <td data-label="Event time">{{ member.event_timestamp|source_time }}</td>
+        <td data-label="Wazuh alert ID"><a href="{{ url_for('dashboard.alert_detail', alert_id=member.id) }}">{{ member.wazuh_alert_id or ('CDSS alert #' ~ member.id) }}</a></td>
+        {% if group.has_source_ip %}<td data-label="Network Source IP">{{ member.source_ip or 'Not provided' }}</td>{% endif %}
+        {% if group.has_username %}<td data-label="Account">{{ member.username or 'Not provided' }}</td>{% endif %}
+        {% if group.has_destination_ip %}<td data-label="Network Destination IP">{{ member.destination_ip or 'Not provided' }}</td>{% endif %}
+        <td data-label="Linked case">{% if member.incident_id %}<a href="{{ url_for('dashboard.incident_detail', incident_id=member.incident_id, group_alert=group.representative_alert_id) }}">#{{ member.incident_id }}</a>{% else %}None{% endif %}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+  </details>
+</section>
+{% endblock %}

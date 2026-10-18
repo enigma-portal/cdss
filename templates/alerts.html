@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <div class="panel-heading"><div><p class="eyebrow">WAZUH DETECTIONS</p><h1>Grouped alerts</h1><p>Equivalent detections are grouped for triage. Existing investigation case membership is preserved for review, even when older case alerts describe different artifacts. Every original alert remains available in history.</p></div><span>{{ pagination.total }} groups · {{ pagination.raw_total }} stored detections{% if pagination.q %} matching search{% endif %}</span></div>
+  <form class="filters contextual-filters" method="get" action="{{ url_for('dashboard.alerts') }}">
+    <label>Search alerts<input name="q" value="{{ pagination.q }}" maxlength="100" placeholder="Alert ID, rule, agent…"></label>
+    <label>Sort by<select name="sort"><option value="priority"{% if pagination.sort == 'priority' %} selected{% endif %}>Initial Priority</option><option value="latest"{% if pagination.sort == 'latest' %} selected{% endif %}>Newest detection</option></select></label>
+    <button type="submit">Apply</button>
+    {% if pagination.q %}<a class="clear" href="{{ url_for('dashboard.alerts', sort=pagination.sort) }}">Clear</a>{% endif %}
+  </form>
+  <p class="metadata">{{ 'Highest assessed Initial Priority first; alerts without an assigned priority follow.' if pagination.sort == 'priority' else 'Newest detections first.' }}</p>
+  {% if alerts %}
+  <div class="table-wrap"><table class="context-table alerts-table">
+    <thead><tr><th>Wazuh detection</th><th>Reported Wazuh Source</th><th>Configured CDSS Asset</th><th>Occurrences / time</th><th>MITRE IDs</th><th>Review status</th></tr></thead>
+    <tbody>{% for alert in alerts %}<tr>
+      <td data-label="Wazuh detection"><a class="incident-link" href="{{ url_for('dashboard.alert_group_detail', alert_id=alert.representative_alert_id) }}">{{ alert.rule_description or 'Description not provided' }}</a><small>{{ 'Initial Priority at case opening' if alert.existing_case_membership else 'Initial Alert Priority' }}: <strong>{{ alert.initial_priority.level or 'Not assessed' }}</strong></small><small>Wazuh Detection Level: {{ alert.rule_level if alert.rule_level is not none else 'Not provided' }}</small></td>
+      <td data-label="Reported Wazuh Source"><strong>{{ alert.reported_system }}</strong><small>Agent Name: {{ alert.agent_name or 'Not provided' }} · Agent ID: {{ alert.agent_id or 'Not provided' }}</small><small>Monitored Endpoint IP: {{ alert.agent_ip or 'Not provided' }}</small></td>
+      <td data-label="Configured CDSS Asset">{% if alert.asset_name %}{{ alert.asset_name }}<small>Criticality: {{ alert.criticality|title }} · Assessment scope: {{ 'Included' if alert.is_protected else 'Not included' }}</small>{% else %}Not mapped{% endif %}</td>
+      <td data-label="Occurrences / time"><strong>{{ alert.occurrences }} {{ 'alerts in existing case' if alert.existing_case_membership else 'occurrences' }}</strong><small>First Seen: {{ alert.first_seen|source_time }}</small><small>Last Seen: {{ alert.last_seen|source_time }}</small></td>
+      <td data-label="MITRE IDs">{{ alert.mitre_ids|join(', ') if alert.mitre_ids else 'Not Mapped' }}</td>
+      <td data-label="Review status">{{ alert.investigation_status }}{% if not alert.fully_assessed %}<small>CDSS Assessment: Pending Investigation</small>{% endif %}<small><a href="{{ url_for('dashboard.alert_group_detail', alert_id=alert.representative_alert_id) }}">Review alert →</a></small></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  <nav class="pagination" aria-label="Alert pages">
+    {% if pagination.page > 1 %}<a href="{{ url_for('dashboard.alerts', page=pagination.page-1, q=pagination.q, sort=pagination.sort) }}">← Previous</a>{% endif %}
+    {% for number in pagination.page_numbers %}{% if number == pagination.page %}<span class="current-page" aria-current="page">{{ number }}</span>{% else %}<a href="{{ url_for('dashboard.alerts', page=number, q=pagination.q, sort=pagination.sort) }}">{{ number }}</a>{% endif %}{% endfor %}
+    {% if pagination.page < pagination.pages %}<a href="{{ url_for('dashboard.alerts', page=pagination.page+1, q=pagination.q, sort=pagination.sort) }}">Next →</a>{% endif %}
+    <form class="page-jump" method="get"><label for="alert-page-jump">Go to page</label><input id="alert-page-jump" name="page" type="number" min="1" max="{{ pagination.pages }}" value="{{ pagination.page }}" required><input type="hidden" name="q" value="{{ pagination.q }}"><input type="hidden" name="sort" value="{{ pagination.sort }}"><button type="submit">Go</button></form>
+  </nav>
+  {% else %}<div class="empty-state"><h3>No matching alerts</h3><p>Adjust the search or review SIEM collection settings.</p></div>{% endif %}
+</section>
+{% endblock %}

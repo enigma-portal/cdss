@@ -3,6 +3,7 @@
 import json
 import re
 import sqlite3
+from app.time_utils import epoch_seconds
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -100,6 +101,7 @@ def get_db_connection():
     DATABASE.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(DATABASE)
     connection.row_factory = sqlite3.Row
+    connection.create_function("cdss_event_epoch", 1, epoch_seconds, deterministic=True)
     connection.execute("PRAGMA foreign_keys = ON")
     return connection
 
@@ -471,10 +473,16 @@ def initialize_database():
                     connection_id INTEGER PRIMARY KEY,
                     event_timestamp TEXT,
                     document_id TEXT,
+                    sort_values_json TEXT CHECK(sort_values_json IS NULL OR json_valid(sort_values_json)),
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (connection_id) REFERENCES siem_connections(id) ON DELETE CASCADE
                 );
             """)
+            cursor_columns = {row['name'] for row in connection.execute(
+                'PRAGMA table_info(ingestion_cursors)')}
+            if 'sort_values_json' not in cursor_columns:
+                connection.execute('''ALTER TABLE ingestion_cursors ADD COLUMN sort_values_json TEXT
+                    CHECK(sort_values_json IS NULL OR json_valid(sort_values_json))''')
             connection.execute("""
                 INSERT OR IGNORE INTO incident_mitre_techniques
                     (incident_id, technique_id, ordinal)
@@ -501,6 +509,21 @@ def initialize_database():
                 )
                 WHERE calculation_details LIKE '%MITRE technique base risk%'
             """)
+
+            from app.database.phase3 import migrate_mitre_provenance
+            migrate_mitre_provenance(connection)
+            from app.database.phase4 import migrate_incident_alerts
+            migrate_incident_alerts(connection)
+            from app.database.architecture import migrate_group_cases
+            migrate_group_cases(connection)
+            from app.database.phase5 import migrate_investigations
+            migrate_investigations(connection)
+            from app.database.archive_evidence import migrate_archive_evidence
+            migrate_archive_evidence(connection)
+            from app.database.phase6 import migrate_risk_assessments
+            migrate_risk_assessments(connection)
+            from app.database.phase7 import migrate_contextual_guidance
+            migrate_contextual_guidance(connection)
 
             user_columns = {row["name"] for row in connection.execute("PRAGMA table_info(users)")}
             if "theme" not in user_columns:

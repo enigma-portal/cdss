@@ -1,14 +1,17 @@
 """Fault-tolerant polling for enabled vendor-neutral SIEM connectors."""
 
 import logging
+import json
 import sqlite3
 from threading import Event, Lock, Thread
 
 from app.database import get_db_connection
+from app.time_utils import utc_now_text
 from app.services.connectors import create_connector
-from app.services.incident_processor import process_alert
+from app.services.incident_processor import ingest_source_alert
 from app.services.secret_store import unprotect_secret
 from app.services.wazuh_indexer import WazuhIndexerError
+from app.single_instance import acquire_poller_lock, AlreadyRunningError
 
 LOGGER = logging.getLogger(__name__)
 _START_LOCK = Lock()
@@ -19,7 +22,7 @@ _STOP = Event()
 def _bounded_integer(value, default, minimum, maximum):
     try:
         value = int(value)
-    except ValueError:
+    except (TypeError, ValueError):
         value = default
     return max(minimum, min(value, maximum))
 
@@ -40,7 +43,7 @@ def _safe_poll_error(error):
     if isinstance(error, sqlite3.DatabaseError):
         return "CDSS database operation failed while handling the SIEM batch."
     if isinstance(error, (TypeError, ValueError)):
-        return f"SIEM event validation failed: {str(error)[:180]}"
+        return "SIEM event validation failed: malformed event or connector configuration."
     return "Unexpected SIEM polling failure; review protected application logs."
 
 
@@ -59,13 +62,18 @@ def _poll_once(batch_size, minimum_level):
             connection = get_db_connection()
             try:
                 cursor = connection.execute("""
-                    SELECT event_timestamp, document_id FROM ingestion_cursors
+                    SELECT event_timestamp, document_id, sort_values_json FROM ingestion_cursors
                     WHERE connection_id = ?
                 """, (row["id"],)).fetchone()
             finally:
                 connection.close()
-            search_after = ((cursor["event_timestamp"], cursor["document_id"])
-                            if cursor and cursor["event_timestamp"] and cursor["document_id"] else None)
+            if cursor and cursor['sort_values_json']:
+                search_after = json.loads(cursor['sort_values_json'])
+            else:
+                # Legacy cursors had TEXT affinity. Never guess that an old
+                # string was originally a numeric OpenSearch sort value.
+                search_after = ((cursor['event_timestamp'], cursor['document_id'])
+                                if cursor and cursor['event_timestamp'] and cursor['document_id'] else None)
             alerts, next_cursor = connector.fetch_event_page(
                 size=batch_size, search_after=search_after,
             )
@@ -76,14 +84,16 @@ def _poll_once(batch_size, minimum_level):
                     rule = alert.get("rule") if isinstance(alert, dict) else None
                     if not isinstance(rule, dict):
                         raise ValueError("SIEM event rule must be an object.")
-                    level = int(rule.get("level", 0))
+                    # Missing severity is only treated as zero for filtering;
+                    # the parser/storage retain NULL, not invented telemetry.
+                    level = int(rule['level']) if rule.get('level') is not None else 0
                     if level < minimum_level:
                         continue
-                    process_alert(alert)
+                    ingest_source_alert(alert)
                     accepted_count += 1
                 except (TypeError, ValueError) as error:
                     LOGGER.warning("Malformed SIEM event skipped for connector %s: %s",
-                                   row["id"], str(error)[:160])
+                                   row["id"], _safe_poll_error(error))
                     rejected_error = error
                     break
             if rejected_error:
@@ -93,20 +103,23 @@ def _poll_once(batch_size, minimum_level):
             connection = get_db_connection()
             try:
                 with connection:
+                    contacted_at = utc_now_text()
                     connection.execute("""UPDATE siem_connections SET status = 'connected',
-                        last_success_at = CURRENT_TIMESTAMP, last_error = NULL,
-                        last_alert_at = CASE WHEN ? > 0 THEN CURRENT_TIMESTAMP ELSE last_alert_at END
-                        WHERE id = ?""", (accepted_count, row["id"]))
+                        last_success_at = ?, last_error = NULL,
+                        last_alert_at = CASE WHEN ? > 0 THEN ? ELSE last_alert_at END
+                        WHERE id = ?""", (contacted_at, accepted_count, contacted_at, row["id"]))
                     if next_cursor:
                         connection.execute("""
                             INSERT INTO ingestion_cursors
-                                (connection_id, event_timestamp, document_id, updated_at)
-                            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                                (connection_id, event_timestamp, document_id, sort_values_json, updated_at)
+                            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
                             ON CONFLICT(connection_id) DO UPDATE SET
                                 event_timestamp = excluded.event_timestamp,
                                 document_id = excluded.document_id,
+                                sort_values_json = excluded.sort_values_json,
                                 updated_at = CURRENT_TIMESTAMP
-                        """, (row["id"], next_cursor[0], next_cursor[1]))
+                        """, (row["id"], str(next_cursor[0]), next_cursor[1],
+                              json.dumps(list(next_cursor), allow_nan=False, separators=(',', ':'))))
             finally:
                 connection.close()
         except Exception as error:
@@ -132,7 +145,7 @@ def _poll_loop():
                 connection.close()
             _poll_once(batch_size, minimum_level)
         except Exception as error:
-            LOGGER.warning("SIEM polling cycle failed: %s", error)
+            LOGGER.warning("SIEM polling cycle failed: %s", _safe_poll_error(error))
         _STOP.wait(interval)
 
 
@@ -143,6 +156,11 @@ def start_realtime_poller(enabled=True):
     with _START_LOCK:
         if _THREAD and _THREAD.is_alive():
             return _THREAD
+        try:
+            acquire_poller_lock()
+        except AlreadyRunningError:
+            LOGGER.info('SIEM collection worker is already owned by another CDSS process.')
+            return None
         _STOP.clear()
         _THREAD = Thread(target=_poll_loop, daemon=True, name="cdss-siem-poller")
         _THREAD.start()

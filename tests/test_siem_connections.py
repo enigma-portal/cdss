@@ -21,6 +21,8 @@ class SiemConnectionTests(unittest.TestCase):
     def setUp(self):
         self.original_database = database.DATABASE
         self.original_key = secret_store.KEY_FILE
+        self.original_polling_enabled = app.config.get('SIEM_REALTIME_ENABLED', True)
+        app.config['SIEM_REALTIME_ENABLED'] = True
         self.directory = tempfile.TemporaryDirectory()
         database.DATABASE = Path(self.directory.name) / "siem-test.db"
         secret_store.KEY_FILE = Path(self.directory.name) / "connector.key"
@@ -35,11 +37,49 @@ class SiemConnectionTests(unittest.TestCase):
     def tearDown(self):
         database.DATABASE = self.original_database
         secret_store.KEY_FILE = self.original_key
+        app.config['SIEM_REALTIME_ENABLED'] = self.original_polling_enabled
         self.directory.cleanup()
 
     def csrf(self):
         with self.client.session_transaction() as current:
             return current["csrf_token"]
+
+    def test_banner_and_admin_page_share_collection_health(self):
+        connection = get_db_connection()
+        with connection:
+            connection.execute("""INSERT INTO siem_connections
+                (name, base_url, port, index_pattern, username, is_enabled, status)
+                VALUES ('Test SIEM', 'https://192.0.2.10', 9200, 'alerts-*', 'reader', 1, 'error')""")
+        connection.close()
+        cases = (
+            (1, 'error', "datetime('now')", 'failed', 'SIEM unavailable'),
+            (1, 'connected', "datetime('now')", 'active', 'SIEM alert collection active'),
+            (1, 'not_tested', 'NULL', 'unknown', 'SIEM alert collection status unknown'),
+            (1, 'connected', "datetime('now', '-10 minutes')", 'stale', 'SIEM alert collection stale'),
+            (0, 'connected', "datetime('now')", 'disabled', 'SIEM alert collection disabled'),
+        )
+        for enabled, status, success_sql, state, label in cases:
+            with self.subTest(state=state):
+                connection = get_db_connection()
+                with connection:
+                    connection.execute(
+                        f"UPDATE siem_connections SET is_enabled=?, status=?, last_success_at={success_sql}",
+                        (enabled, status),
+                    )
+                connection.close()
+                overview = self.client.get('/')
+                admin = self.client.get('/admin/siem-connections')
+                self.assertEqual(overview.status_code, 200)
+                self.assertEqual(admin.status_code, 200)
+                for response in (overview, admin):
+                    rendered = response.get_data(as_text=True)
+                    self.assertIn(f'collection-{state}', rendered)
+                    self.assertIn(label, rendered)
+                    self.assertNotIn('SIEM monitoring', rendered)
+                    self.assertNotIn('Realtime', rendered)
+                self.assertIn(f'state-{state}', admin.get_data(as_text=True))
+                if state == 'failed':
+                    self.assertNotIn('collection-active', overview.get_data(as_text=True))
 
     def test_admin_saves_encrypted_disabled_connection(self):
         response = self.client.post("/admin/siem-connections", data={
@@ -61,6 +101,9 @@ class SiemConnectionTests(unittest.TestCase):
         page = self.client.get("/admin/siem-connections")
         self.assertIn(b"https://192.0.2.10:9200", page.data)
         self.assertNotIn(b"address hidden", page.data)
+        self.assertIn(b"Certificate verification enabled", page.data)
+        self.assertNotIn(b"TLS verified", page.data)
+        self.assertIn(b"Last reported cluster health", page.data)
 
         edit = self.client.post("/admin/siem-connections/1/edit", data={
             "csrf_token": self.csrf(), "action": "details", "name": "Renamed SIEM",
@@ -90,6 +133,29 @@ class SiemConnectionTests(unittest.TestCase):
         remaining = connection.execute("SELECT COUNT(*) AS total FROM siem_connections").fetchone()["total"]
         connection.close()
         self.assertEqual(remaining, 0)
+
+    def test_connection_test_stores_explicit_utc_and_renders_labelled_time(self):
+        from unittest.mock import Mock, patch
+        connection=get_db_connection()
+        with connection:
+            cid=connection.execute("""INSERT INTO siem_connections
+                (name,base_url,port,index_pattern,username,encrypted_password)
+                VALUES('UTC test','https://192.0.2.10',9200,'wazuh-alerts-*','reader',X'01')""").lastrowid
+        connection.close()
+        connector=Mock();connector.test_connection.return_value={'status':'green'}
+        with (patch('app.routes.auth.create_connector',return_value=connector),
+              patch('app.routes.auth._validated_siem_endpoint',return_value=('https://192.0.2.10',9200)),
+              patch('app.routes.auth.unprotect_secret',return_value='fixture'),
+              patch('app.routes.auth.utc_now_text',return_value='2026-10-15T12:02:00Z')):
+            response=self.client.post(f'/admin/siem-connections/{cid}/test',data={'csrf_token':self.csrf()})
+        self.assertEqual(response.status_code,302)
+        connection=get_db_connection()
+        self.assertEqual(connection.execute('SELECT last_success_at FROM siem_connections WHERE id=?',
+                                           (cid,)).fetchone()[0],'2026-10-15T12:02:00Z')
+        connection.close()
+        html=self.client.get('/admin/siem-connections').get_data(as_text=True)
+        self.assertIn('datetime="2026-10-15T12:02:00Z"',html)
+        self.assertIn('2026-10-15 12:02:00 UTC',html)
 
     def test_rejects_non_https_endpoint(self):
         response = self.client.post("/admin/siem-connections", data={

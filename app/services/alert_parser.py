@@ -1,7 +1,7 @@
 """Extract the CDSS-required fields from a raw Wazuh alert."""
 
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from app.time_utils import parse_timestamp
 import ipaddress
 import json
 
@@ -82,6 +82,106 @@ def _groups(value):
     return tuple(result[:64])
 
 
+def reported_account(raw_alert):
+    """Read only explicit Wazuh account fields; never infer one from free text."""
+    if not isinstance(raw_alert, dict):
+        return None
+    data = raw_alert.get("data")
+    if not isinstance(data, dict):
+        return None
+    win = data.get("win")
+    eventdata = win.get("eventdata") if isinstance(win, dict) else None
+    values = (data.get("srcuser"), data.get("dstuser"), data.get("user"),
+              eventdata.get("targetUserName") if isinstance(eventdata, dict) else None,
+              eventdata.get("user") if isinstance(eventdata, dict) else None)
+    for value in values:
+        if value is not None:
+            return _text(value, 255, "username")
+    return None
+
+
+def stored_reported_account(raw_json):
+    """Read historical raw records without changing their saved normalized fields."""
+    try:
+        source = json.loads(raw_json)
+        if isinstance(source, dict) and isinstance(source.get("_source"), dict):
+            source = source["_source"]
+        return reported_account(source)
+    except (TypeError, ValueError):
+        return None
+
+
+def reported_source_ip(raw_alert):
+    """Explicit event source IP: generic, Windows logon or Sysmon Event 3."""
+    data = raw_alert.get("data") if isinstance(raw_alert, dict) else None
+    if not isinstance(data, dict):
+        return None
+    direct = data.get("srcip") or raw_alert.get("srcip")
+    if direct is not None:
+        return _ip(direct, "source IP")
+    win = data.get("win")
+    if not isinstance(win, dict):
+        return None
+    system = win.get("system")
+    eventdata = win.get("eventdata")
+    event_id = system.get("eventID") if isinstance(system, dict) else None
+    if not isinstance(eventdata, dict):
+        return None
+    if str(event_id) in ("4624", "4625", "4771"):
+        candidate = eventdata.get("ipAddress")
+    elif (str(event_id) == "3" and isinstance(raw_alert.get("rule"), dict)
+          and "sysmon" in (raw_alert["rule"].get("groups") or [])):
+        candidate = eventdata.get("sourceIp")
+    else:
+        return None
+    try:
+        return _ip(candidate, "source IP")
+    except ValueError:
+        return None
+
+
+def stored_reported_source_ip(raw_json):
+    try:
+        source = json.loads(raw_json)
+        if isinstance(source, dict) and isinstance(source.get("_source"), dict):
+            source = source["_source"]
+        return reported_source_ip(source)
+    except (TypeError, ValueError):
+        return None
+
+
+def reported_destination_ip(raw_alert):
+    data = raw_alert.get('data') if isinstance(raw_alert, dict) else None
+    if not isinstance(data, dict):
+        return None
+    direct = data.get('dstip') or raw_alert.get('dstip')
+    if direct is not None:
+        return _ip(direct, 'destination IP')
+    win = data.get('win')
+    if not isinstance(win, dict):
+        return None
+    system, fields = win.get('system'), win.get('eventdata')
+    rule = raw_alert.get('rule')
+    if (not isinstance(system, dict) or str(system.get('eventID')) != '3'
+            or not isinstance(fields, dict) or not isinstance(rule, dict)
+            or 'sysmon' not in (rule.get('groups') or [])):
+        return None
+    try:
+        return _ip(fields.get('destinationIp'), 'destination IP')
+    except ValueError:
+        return None
+
+
+def stored_reported_destination_ip(raw_json):
+    try:
+        source = json.loads(raw_json)
+        if isinstance(source, dict) and isinstance(source.get('_source'), dict):
+            source = source['_source']
+        return reported_destination_ip(source)
+    except (TypeError, ValueError):
+        return None
+
+
 def parse_alert(raw_alert):
     """Parse a Wazuh alert dictionary into a stable CDSS alert structure."""
     if not isinstance(raw_alert, dict):
@@ -101,10 +201,10 @@ def parse_alert(raw_alert):
     if not event_timestamp or rule_id is None:
         raise ValueError("A Wazuh alert needs both timestamp and rule.id.")
     event_timestamp = _text(event_timestamp, 64, "timestamp", required=True)
-    try:
-        datetime.fromisoformat(event_timestamp.replace("Z", "+00:00"))
-    except ValueError as error:
-        raise ValueError("Wazuh timestamp must be ISO-8601.") from error
+    source_timestamp = parse_timestamp(event_timestamp)
+    if source_timestamp is None:
+        raise ValueError("Wazuh timestamp must be ISO-8601 with an explicit timezone offset.")
+    event_timestamp = source_timestamp.isoformat()
 
     level = rule.get("level")
     try:
@@ -114,7 +214,7 @@ def parse_alert(raw_alert):
     if rule_level is not None and not 0 <= rule_level <= 16:
         raise ValueError("Wazuh rule.level must be between 0 and 16.")
 
-    username = data.get("srcuser") or data.get("dstuser") or data.get("user")
+    username = reported_account(raw_alert)
 
     return ParsedAlert(
         wazuh_alert_id=_text(raw_alert.get("id"), 256, "id"),
@@ -125,10 +225,10 @@ def parse_alert(raw_alert):
         agent_id=_text(agent.get("id"), 64, "agent.id"),
         agent_name=_text(agent.get("name"), 255, "agent.name"),
         agent_ip=_ip(agent.get("ip"), "agent.ip"),
-        source_ip=_ip(data.get("srcip") or raw_alert.get("srcip"), "source IP"),
-        destination_ip=_ip(data.get("dstip") or raw_alert.get("dstip"), "destination IP"),
+        source_ip=reported_source_ip(raw_alert),
+        destination_ip=reported_destination_ip(raw_alert),
         mitre_ids=_as_mitre_ids(mitre.get("id")),
         rule_groups=_groups(rule.get("groups")),
-        username=_text(username, 255, "username"),
+        username=username,
         raw_alert=json.dumps(raw_alert, separators=(",", ":"), ensure_ascii=False),
     )

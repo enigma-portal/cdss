@@ -10,13 +10,16 @@ from datetime import datetime, timedelta, timezone
 from time import monotonic
 from urllib.parse import urlsplit
 
-from flask import Blueprint, flash, g, redirect, render_template, request, session, url_for
+from flask import Blueprint, current_app, flash, g, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.auth import admin_required, login_required, validate_csrf
 from app.database import get_db_connection
+from app.time_utils import utc_now_text
 from app.services.connectors import CONNECTOR_TYPES, create_connector
 from app.services.secret_store import protect_secret, unprotect_secret, SecretProtectionError
+from app.services.wazuh_indexer import WazuhIndexerError
+from app.services.siem_collection_status import connector_collection_status
 
 auth = Blueprint("auth", __name__)
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
@@ -70,9 +73,12 @@ def _valid_password(password):
 
 
 def _safe_next(value):
-    if not value:
+    if not value or value.startswith('//') or '\\' in value or any(ord(char) < 32 for char in value):
         return url_for("dashboard.index")
-    parsed = urlsplit(value)
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return url_for("dashboard.index")
     return value if not parsed.scheme and not parsed.netloc and value.startswith("/") else url_for("dashboard.index")
 
 
@@ -409,8 +415,15 @@ def siem_connections():
                                      username, verify_tls, is_enabled, status, last_success_at,
                                      last_error, response_time_ms, cluster_health, last_alert_at
                               FROM siem_connections ORDER BY name""").fetchall()
+        interval_row = connection.execute("""SELECT setting_value FROM system_settings
+            WHERE setting_key='poll_interval_seconds'""").fetchone()
+        poll_interval = interval_row['setting_value'] if interval_row else '30'
+        polling_enabled = current_app.config.get('SIEM_REALTIME_ENABLED', True)
+        now = datetime.now(timezone.utc)
         items = [dict(row) | {
-            "display_endpoint": _display_endpoint(row["base_url"], row["port"])
+            "display_endpoint": _display_endpoint(row["base_url"], row["port"]),
+            "collection_status": connector_collection_status(
+                row, poll_interval, now=now, polling_enabled=polling_enabled),
         } for row in rows]
         return render_template("siem_connections.html", connections=items, connector_types=CONNECTOR_TYPES)
     finally:
@@ -460,13 +473,20 @@ def test_siem_connection(connection_id):
             cluster_health = str(health.get("status", "available"))[:32]
             with connection:
                 connection.execute("""UPDATE siem_connections SET status = 'connected',
-                    last_success_at = CURRENT_TIMESTAMP, last_error = NULL, response_time_ms = ?,
+                    last_success_at = ?, last_error = NULL, response_time_ms = ?,
                     cluster_health = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
-                    (elapsed, cluster_health, connection_id))
+                    (utc_now_text(), elapsed, cluster_health, connection_id))
                 _audit_connector(connection, connection_id, "connection_test_succeeded", f"Health={cluster_health}; response={elapsed}ms.")
             flash(f"Connection successful ({elapsed} ms, cluster {cluster_health}).", "success")
         except Exception as error:
-            safe_error = str(error)[:240]
+            # Only application-owned diagnostic exceptions have safe messages.
+            # Unexpected exception text may contain credentials or response data.
+            if isinstance(error, (WazuhIndexerError, SecretProtectionError)):
+                safe_error = str(error)[:240]
+            elif isinstance(error, ValueError):
+                safe_error = 'Invalid SIEM endpoint or connector configuration.'
+            else:
+                safe_error = 'Unexpected SIEM connection-test failure. Check connector configuration and service availability.'
             with connection:
                 connection.execute("UPDATE siem_connections SET status = 'error', last_error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (safe_error, connection_id))
                 _audit_connector(connection, connection_id, "connection_test_failed", safe_error)

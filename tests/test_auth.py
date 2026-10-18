@@ -11,6 +11,13 @@ from run import app
 
 
 class AuthenticationTests(unittest.TestCase):
+    def test_login_redirect_rejects_browser_normalized_external_paths(self):
+        from app.routes.auth import _safe_next
+        with app.test_request_context('/'):
+            for value in ('/\\example.com','//example.com','///example.com','https://example.com','//[','/\n/example.com'):
+                self.assertEqual(_safe_next(value),'/',value)
+            self.assertEqual(_safe_next('/incidents?page=2'),'/incidents?page=2')
+
     def setUp(self):
         self.original_database = database.DATABASE
         self.directory = tempfile.TemporaryDirectory()
@@ -110,7 +117,9 @@ class AuthenticationTests(unittest.TestCase):
 
     def test_admin_updates_audited_security_settings(self):
         self._create_admin()
-        self.client.get("/admin/security-settings")
+        page=self.client.get("/admin/security-settings")
+        self.assertIn(b'<details class="settings-section"><summary>Legacy compatibility settings</summary>',page.data)
+        self.assertNotIn(b'before recurrence influences CDSS risk',page.data)
         response = self.client.post("/admin/security-settings", data={
             "csrf_token": self._csrf(), "session_timeout_minutes": "30",
             "default_theme": "high-contrast",

@@ -1,5 +1,6 @@
-"""Recalculate stored decisions after a reviewed scoring-model change."""
+"""Explicit maintenance of legacy numeric history, never contextual assessment."""
 
+import argparse
 import json
 
 from app.database import get_db_connection
@@ -11,14 +12,18 @@ from app.services.incident_processor import (
 from app.services.recommendation_engine import rebuild_recommendations
 
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--confirm-legacy-rewrite', action='store_true')
+    if not parser.parse_args(argv).confirm_legacy_rewrite:
+        parser.error('Legacy history rewrite requires --confirm-legacy-rewrite; use the investigation workflow for contextual assessment.')
     connection = get_db_connection()
     try:
         rows = connection.execute("""
             SELECT incidents.id AS incident_id, incidents.technique_id,
                    alerts.raw_alert, alerts.event_timestamp, alerts.rule_id, alerts.agent_id
             FROM incidents JOIN alerts ON alerts.id = incidents.alert_id
-            ORDER BY alerts.event_timestamp, alerts.id
+            ORDER BY cdss_event_epoch(alerts.event_timestamp), alerts.id
         """).fetchall()
         with connection:
             for row in rows:
@@ -29,7 +34,8 @@ def main():
                     event_count = connection.execute("""
                         SELECT COUNT(*) FROM alerts
                         WHERE rule_id = ? AND COALESCE(agent_id, '') = COALESCE(?, '')
-                          AND event_timestamp >= ? AND event_timestamp <= ?
+                          AND cdss_event_epoch(event_timestamp) >= cdss_event_epoch(?)
+                          AND cdss_event_epoch(event_timestamp) <= cdss_event_epoch(?)
                     """, (parsed.rule_id, parsed.agent_id, window_start,
                           parsed.event_timestamp)).fetchone()[0]
                 base_risk = _base_technique_risk(connection, row["technique_id"])
@@ -52,7 +58,7 @@ def main():
                       priority_for_risk(risk.final_risk_score), explanation,
                       row["incident_id"]))
             rebuild_recommendations(connection)
-        print(f"Re-scored {len(rows)} incidents with context-aware confidence.")
+        print(f"Re-scored {len(rows)} legacy numeric records. Contextual assessments and confidence were not changed.")
     finally:
         connection.close()
 

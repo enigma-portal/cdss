@@ -1,27 +1,203 @@
 {% extends "base.html" %}
 {% block content %}
-<a class="back" href="{{ url_for('dashboard.incidents') }}">← Back to incidents</a>
-<section class="detail-head">
-  <div><p class="eyebrow">INCIDENT #{{ incident.id }}</p><h2>{{ incident.title }}</h2>
-    <p class="metadata">Detected {{ incident.detected_at }} · SIEM rule {{ incident.rule_id }}</p></div>
-  <div class="decision-badges"><span class="badge {{ incident.severity_label }}">{{ incident.severity_label }}</span><span class="priority">{{ incident.priority }}</span><strong>{{ "%.2f"|format(incident.final_risk_score or 0) }}/10</strong></div>
+<a class="back" href="{{ url_for('dashboard.incidents') }}">← Back to investigations</a>
+
+<section class="panel detail-card analyst-section" id="incident-summary" aria-labelledby="summary-heading">
+  <p class="eyebrow">INVESTIGATION CASE #{{ incident.id }}</p>
+  <h2 id="summary-heading">Investigation Trigger</h2>
+  <h3 class="incident-title">{{ incident.title }}</h3>
+  <dl class="summary-facts">
+    <div><dt>Status</dt><dd>{{ incident.status|title }}</dd></div>
+    <div><dt>Wazuh Detection Level</dt><dd><strong>{{ incident.rule_level if incident.rule_level is not none else 'Not provided' }}</strong></dd></div>
+    <div><dt>Last activity</dt><dd>{{ (incident.last_activity_at or incident.detected_at)|source_time }}</dd></div>
+  </dl>
+  <div class="source-asset-grid">
+    <section class="source-asset-card"><h3>Reported Wazuh Source</h3><dl class="source-facts">
+      <dt>Reported system</dt><dd>{{ reported_system }}</dd>
+      <dt>Agent Name</dt><dd>{{ incident.agent_name or 'Not provided' }}</dd>
+      <dt>Wazuh Agent ID</dt><dd>{{ incident.agent_id or 'Not provided' }}</dd>
+      <dt>Monitored Endpoint IP</dt><dd>{{ incident.agent_ip or 'Not provided' }}</dd>
+    </dl></section>
+    <section class="source-asset-card"><h3>Configured CDSS Asset</h3>
+      {% if asset %}<dl class="source-facts"><dt>Asset</dt><dd>{{ asset.asset_name }}</dd><dt>Current asset criticality</dt><dd>{{ asset.criticality|title }}</dd><dt>Contextual assessment scope</dt><dd>{{ 'Included' if asset.is_protected else 'Not included' }}</dd></dl>
+      {% else %}<dl class="source-facts"><dt>Asset</dt><dd>Not mapped</dd><dt>Asset criticality</dt><dd>Unavailable</dd><dt>Contextual assessment scope</dt><dd>Unavailable — administrator configuration required</dd></dl><p>Unassessed because no mapped asset/criticality/assessment scope is available.</p>{% endif %}
+    </section>
+  </div>
+  {% if asset and not asset.is_protected %}<p class="metadata">This asset is not included in contextual assessment scope.</p>{% endif %}
+  <p class="what-happened"><strong>What happened?</strong> {{ presentation.summary }}</p>
 </section>
 
-<div class="detail-grid">
-  <section class="panel detail-card"><h3>Decision factors</h3>
-    <p class="decision-summary">Evidence used: {{ incident.classification_source }} classification; {{ incident.risk_basis }} scoring.</p>
-    {% if incident.risk_basis == 'WAZUH_PLUS_MITRE' %}<div class="score-factors"><div><span>Detection strength</span><strong>{{ incident.rule_level_score }}</strong><small>40% of score</small></div><div><span>CDSS technique weight</span><strong>{{ incident.technique_risk_score }}</strong><small>40% · project-defined</small></div><div><span>Repeat activity</span><strong>{{ incident.frequency_score }}</strong><small>20% of score</small></div></div>{% else %}<div class="score-factors"><div><span>Detection strength</span><strong>{{ incident.rule_level_score }}</strong><small>80% of score</small></div><div><span>Repeat activity</span><strong>{{ incident.frequency_score }}</strong><small>20% of score</small></div></div>{% endif %}
-    <details><summary>Why this priority?</summary><p>{{ incident.decision_reason }}</p><small>CDSS support score; the SIEM's original rule level remains unchanged.</small></details>
-  </section>
-  <section class="panel detail-card"><h3>Alert context</h3><dl>
-    <dt>Affected asset</dt><dd>{{ incident.agent_name or 'Unknown agent' }}{% if incident.agent_id %} (#{{ incident.agent_id }}){% endif %}{% if incident.agent_ip %}<br>{{ incident.agent_ip }}{% endif %}</dd>
-    {% if incident.source_ip or incident.destination_ip %}<dt>Network context</dt><dd>{% if incident.source_ip %}Source: {{ incident.source_ip }}{% endif %}{% if incident.source_ip and incident.destination_ip %}<br>{% endif %}{% if incident.destination_ip %}Destination: {{ incident.destination_ip }}{% endif %}</dd>{% endif %}
-    <dt>SIEM alert ID</dt><dd>{{ incident.wazuh_alert_id or 'Not supplied' }}</dd><dt>Status</dt><dd>{{ incident.status|title }}</dd>
-  </dl></section>
-  <section class="panel detail-card"><h3>Classification</h3><dl><dt>Source</dt><dd>{{ incident.classification_source }}</dd><dt>Classification</dt><dd>{{ incident.classification_label }}</dd><dt>ATT&CK techniques</dt><dd>{% if techniques %}{% for technique in techniques %}{{ technique.technique_id }} · {{ technique.technique_name }}{% if not loop.last %}<br>{% endif %}{% endfor %}{% else %}Not Mapped{% endif %}</dd><dt>Context</dt><dd>{{ incident.rule_groups or 'No recognized group context' }}</dd></dl></section>
-</div>
+{% if initial_priority %}<section class="panel detail-card analyst-section" id="initial-priority">
+  <h2>Initial Alert Priority</h2>
+  <p><strong>{{ initial_priority.initial_priority or 'Not assessed' }}</strong> — the grouped-alert triage priority when this case was opened. It is separate from the later contextual assessment.</p>
+  <details><summary>Why this initial priority?</summary><p>{{ initial_priority.initial_priority_rationale }}</p></details>
+</section>{% endif %}
 
-<section class="panel recommendations"><div class="panel-heading"><div><p class="eyebrow">DECISION SUPPORT</p><h2>Recommended response</h2></div></div>
-  <p class="recommendation-intro">Follow these actions in order. Containment is conditional unless malicious activity is confirmed.</p><ol>{% for item in recommendations %}<li><span class="step">{{ loop.index }}</span><div><span class="phase">{{ item.response_phase }}</span><strong>{{ item.action_text }}</strong><p class="plain-why"><b>Why:</b> {{ item.rationale }}</p><details><summary>Technical reference</summary><small>{{ item.framework }}{% if item.control_reference %} · {{ item.control_reference }}{% endif %}</small></details></div></li>{% endfor %}</ol>
+{% if selected_playbook %}<section class="panel detail-card analyst-section" id="investigation-approach">
+  <h2>Investigation Approach</h2>
+  <p><strong>Playbook applied:</strong> {{ selected_playbook.name }}. Selected automatically by CDSS.</p>
+  <p><strong>Why this approach:</strong> {{ selected_playbook_reason or 'The source trigger matched this investigation method; detailed selection reason was not saved for this execution.' }}</p>
+  {% if playbook_source_verified %}<p><strong>Source artifact:</strong> {{ selected_playbook.source_title }} · version {{ selected_playbook.version }}{% if selected_playbook.source_url %} · <a href="{{ selected_playbook.source_url }}" target="_blank" rel="noopener noreferrer">Source reference</a>{% endif %}</p>
+  {% else %}<p class="metadata">{{ 'CDSS generic evidence review; no external playbook was imported.' if selected_playbook.key == 'generic_evidence_review_v1' else 'Imported artifact provenance was not verified for this saved execution.' }}</p>{% endif %}
+  <p><strong>Checks recorded:</strong> {{ check_counts.total }} total · Observed {{ check_counts.observed }} · Not Observed {{ check_counts.not_observed }} · Unavailable {{ check_counts.unavailable }}</p>
+  {% if selected_playbook.evidence_requests %}<details><summary>Evidence checks</summary><ul>{% for check in selected_playbook.evidence_requests %}<li>{{ check.label }}</li>{% endfor %}</ul></details>{% endif %}
+</section>{% endif %}
+
+<section class="panel detail-card analyst-section" id="archive-evidence">
+  <h2>Supporting Evidence</h2>
+  {% if timeline|length > 1 %}
+  <div id="related-evidence" class="timeline-brief">
+    <h3>Related alert timeline</h3>
+    <p class="metadata">Chronological alerts, not a confirmed attack chain.</p>
+    <ol>{% for alert in timeline %}
+      <li id="alert-{{ alert.id }}">{{ (alert.event_timestamp if alert.time_known else none)|source_time }}
+        <strong>{{ alert.rule_description or 'Wazuh alert without description' }}</strong>
+        <span>Wazuh Detection Level: {{ alert.rule_level if alert.rule_level is not none else 'Unavailable' }}</span>
+        {% if alert.source_ip or alert.username %}<span>{% if alert.source_ip %}Source: {{ alert.source_ip }}{% endif %}{% if alert.username %} · Account: {{ alert.username }}{% endif %}</span>{% endif %}
+      </li>
+    {% endfor %}</ol>
+  </div>
+  {% else %}<p>One linked source alert is available for this case.</p>{% endif %}
+  {% if archive_runs %}
+  <p>Retrieved archive observations are checked during investigation; retrieval status alone does not assign an evidence state or risk.</p>
+  {% for archive_run in archive_runs %}
+    <p>{{ archive_run.created_at|db_time }} · {{ archive_run.retrieval_status|title }} · {{ archive_run.retrieved_count if archive_run.retrieval_status in ('available','empty') else 'Not Available' }} same-system archive events · {{ archive_run.cross_retrieved_count if archive_run.cross_retrieval_status in ('available','empty') else 'Not Available' }} other-system events{% if archive_run.truncated or archive_run.cross_truncated %} · Results truncated{% endif %} · <a href="{{ url_for('dashboard.archive_evidence_detail', execution_id=archive_run.investigation_id) }}">View archive evidence</a></p>
+  {% endfor %}
+  {% endif %}
+  {% if latest_archive and latest_archive.evidence %}<details>
+    <summary>Review archive observations{% if contextual %} available to the saved assessment{% endif %} ({{ latest_archive.evidence|length }})</summary>
+    <ol>{% for item in latest_archive.evidence[:20] %}
+      <li>{{ item.event_timestamp|source_time }} · {{ item.short_summary }} · Reported agent {{ item.agent_id }}{% if item.selected_fields.username %} · Account {{ item.selected_fields.username }}{% endif %}{% if item.selected_fields.source_ip %} · Network Source IP {{ item.selected_fields.source_ip }}{% endif %}</li>
+    {% endfor %}</ol>
+    {% if latest_archive.evidence|length > 20 %}<p>Additional observations are available on the archive evidence page.</p>{% endif %}
+  </details>{% endif %}
 </section>
+
+{% if latest_archive and latest_archive.cross_retrieved_count %}<section class="panel detail-card analyst-section" id="related-systems">
+  <h2>Related Systems / Activity</h2>
+  {% if latest_archive.cross_truncated %}<p class="context-notice">Other-system coverage is partial: {{ latest_archive.cross_retrieved_count }} retained{% if latest_archive.cross_total_hits is not none %} of at least {{ latest_archive.cross_total_hits }} matching events{% endif %}. Missing activity cannot be ruled out.</p>{% endif %}
+  <p>{{ latest_archive.cross_retrieved_count }} matching archive observation(s) were recorded on another reported agent within the bounded window. The shared source and account are pivots, not proof of a host-to-host attack.</p>
+  <ul>{% for item in latest_archive.evidence if item.related_system %}<li>{{ item.event_timestamp|source_time }} · Agent {{ item.agent_id }} · {{ item.short_summary }}{% if item.selected_fields.source_ip %} · Network Source IP pivot {{ item.selected_fields.source_ip }}{% endif %}{% if item.selected_fields.username %} · Account {{ item.selected_fields.username }}{% endif %} · <a href="{{ url_for('dashboard.archive_evidence_detail', execution_id=latest_archive.investigation_id) }}">Source record</a></li>{% endfor %}</ul>
+</section>{% endif %}
+
+<section class="panel detail-card analyst-section" id="investigation" aria-labelledby="evidence-heading">
+  <h2 id="evidence-heading">Investigation Findings</h2>
+  <ul class="evidence-list">
+    {% for item in presentation.evidence %}
+    <li class="evidence-{{ item.status }}"><span class="evidence-state">{{ item.status|replace('_', ' ')|title }}</span><span>{{ item.label }}</span></li>
+    {% endfor %}
+  </ul>
+  <p class="metadata">Findings describe available incident evidence, not a confirmed compromise.</p>
+  {% if techniques %}<div class="mitre-brief" id="mitre-context">
+    <h3>MITRE ATT&amp;CK Context</h3>
+    <ul>{% for technique in techniques %}<li><strong>{{ technique.technique_id }} — {{ technique.technique_name }}</strong>{% if technique.tactic %}<span> Tactic{{ 's' if ',' in technique.tactic else '' }}: {{ technique.tactic }}</span>{% endif %}</li>{% endfor %}</ul>
+  </div>{% endif %}
+</section>
+
+<section class="panel detail-card analyst-section" id="contextual-assessment" aria-labelledby="assessment-heading">
+  <h2 id="assessment-heading">Evidence Strength</h2>
+  {% if presentation.asset_changed %}
+  <div class="context-notice" role="status">Asset context has changed since this assessment. Re-run investigation and assessment to use the current asset configuration.</div>
+  {% endif %}
+  {% for notice in presentation.other_changes %}<div class="context-notice" role="status">{{ notice }}</div>{% endfor %}
+  <dl class="assessment-facts">
+    <div><dt>Evidence Strength <details class="help-tip heading-tip"><summary aria-label="What are CDSS evidence states?">?</summary><span>T1 — Limited evidence. T2 — Related suspicious activity. T3 — Strong corroborating evidence. T4 — Progressed activity. Inconclusive — evidence is insufficient, unavailable, or contradictory. These are CDSS investigation states, not Wazuh or MITRE severity.</span></details></dt><dd>{{ contextual.evidence_state if contextual else 'Not Yet Assessed' }}{% if contextual and contextual.evidence_state in ('T1','T2','T3','T4') %} — {{ {'T1':'Limited Evidence','T2':'Suspicious Activity','T3':'Strong Evidence','T4':'Advanced / Progressed Activity'}[contextual.evidence_state] }}{% endif %}</dd></div>
+  </dl>
+  {% if presentation.evidence_reason %}<p><strong>Why this evidence state?</strong> {{ presentation.evidence_reason }}</p>{% endif %}
+  <h3>Contextual Risk + Confidence</h3>
+  <dl class="assessment-facts">
+    <div><dt>Asset Criticality Used</dt><dd>{{ contextual.asset_criticality_snapshot|title if contextual and contextual.asset_criticality_snapshot else 'Unavailable in saved assessment' }}</dd></div>
+    {% if contextual %}<div><dt>CDSS Contextual Risk</dt><dd>{{ contextual.risk_level|title if contextual.risk_level else 'Unassessed' }}</dd></div>{% else %}<div><dt>CDSS Assessment</dt><dd>Pending Investigation</dd></div>{% endif %}
+    <div><dt>Assessment Confidence</dt><dd>{{ contextual.confidence|title if contextual else 'Not assessed' }}</dd></div>
+  </dl>
+  <p><strong>Why this risk?</strong> {{ presentation.why or 'A contextual assessment has not been completed.' }}</p>
+  {% if presentation.decisive_alerts %}<p class="metadata">Supporting source alerts: {% for alert in presentation.decisive_alerts %}<a href="{{ url_for('dashboard.alert_detail', alert_id=alert.id) }}">{{ alert.wazuh_alert_id or ('CDSS alert #' ~ alert.id) }}</a>{{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}
+  {% if presentation.not_observed_findings %}<p class="metadata">Not observed in available evidence: {{ presentation.not_observed_findings|join(', ') }}.</p>{% endif %}
+  {% if presentation.unavailable_findings %}<p class="metadata">Unavailable evidence: {{ presentation.unavailable_findings|join(', ') }}.</p>{% endif %}
+  <p class="metadata">Evidence State is defined by CDSS; Wazuh Detection Level is not the final contextual risk.</p>
+  <form method="post" action="{{ url_for('dashboard.investigate', incident_id=incident.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="button secondary" type="submit">{{ 'Re-run Investigation & Reassess' if contextual else 'Run Investigation & Assess' }}</button>
+  </form>
+</section>
+
+<section class="panel detail-card analyst-section" id="contextual-guidance" aria-labelledby="actions-heading">
+  <h2 id="actions-heading">Recommended Actions</h2>
+  {% if not contextual %}<p class="guidance-context">CDSS Assessment: <strong>Pending Investigation</strong></p>{% endif %}
+  <p class="metadata">Advisory guidance only. CDSS does not execute security actions.</p>
+  {% for category in ('Investigation', 'Monitoring', 'Containment', 'Remediation') %}
+    {% set actions = current_guidance|selectattr('category', 'equalto', category)|list %}
+    {% if actions %}<h3>{{ category }}</h3>
+    <ol class="action-list">{% for item in actions %}
+      <li><strong>{{ item.display_action }}</strong>{% if item.display_why %}<p class="metadata"><strong>Why this action?</strong> {{ item.display_why }}</p>{% endif %}{% if item.display_evidence %}<p class="metadata"><strong>Supporting evidence:</strong> {{ item.display_evidence }}</p>{% endif %}<p class="metadata">{{ 'CDSS Evidence-Based Guidance' if item.source_reference.startswith('CDSS project guidance') else item.source_reference }}</p></li>
+    {% endfor %}</ol>
+    {% endif %}
+  {% endfor %}
+  {% if not current_guidance %}<p>{{ 'No current recommendations were generated. The saved assessment remains available for analyst review.' if contextual else 'Run an investigation and contextual assessment to obtain recommendations.' }}</p>{% endif %}
+</section>
+
+<section class="panel detail-card analyst-section" id="analyst-decision" aria-labelledby="decision-heading">
+  <h2 id="decision-heading">Analyst Decision</h2>
+  <p class="metadata">This decision applies to the current recommended response plan. Recording it does not execute an action or close the case.</p>
+  {% if current_decision %}<div class="decision-row"><h3>Current Analyst Decision</h3><dl class="source-facts">
+    <dt>Decision</dt><dd>{{ current_decision.decision|replace('_',' ')|title }}</dd>
+    <dt>Analyst</dt><dd>{{ current_decision.analyst_name_snapshot }}</dd>
+    <dt>Recorded</dt><dd>{{ current_decision.created_at|db_time }}</dd>
+    <dt>Reason</dt><dd>{{ current_decision.comments or 'No reason recorded' }}</dd>
+  </dl></div>{% else %}<p>No analyst decision recorded. The current assessment is awaiting review.</p>{% endif %}
+  {% if contextual and current_guidance %}
+    <form class="analyst-decision-form compact-decision" method="post" action="{{ url_for('dashboard.analyst_decision',incident_id=incident.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="assessment_id" value="{{ contextual.id }}">
+      <label for="case-decision">Decision</label>
+      <select id="case-decision" name="decision" required>
+        <option value="" selected disabled>Select a decision</option>
+        <option value="accept">Accept Recommendation</option>
+        <option value="reject">Reject Recommendation</option>
+        <option value="further_investigation_required">Further Investigation Required</option>
+      </select>
+      <label for="case-comments">Comment / reason</label>
+      <textarea id="case-comments" name="comments" maxlength="4000" rows="2"></textarea>
+      <button class="button secondary" type="submit">Save decision</button>
+    </form>
+  {% elif not current_guidance %}<p>No current recommended plan to decide on.</p>{% endif %}
+  <details><summary>Decision History</summary>
+    {% for decision in decisions %}<p>{{ decision.created_at|db_time }} · {{ decision.decision|replace('_',' ')|title }} · {{ decision.analyst_name_snapshot }}{% if decision.comments %}<br>Reason: {{ decision.comments }}{% endif %}</p>{% else %}<p>No earlier decisions.</p>{% endfor %}
+  </details>
+</section>
+
+<details class="panel detail-card" id="technical-details">
+  <summary>Technical / Audit Details</summary>
+  <div class="audit-content">
+    <h3>Audit Summary</h3>
+    {% if playbook_source_verified %}<p><strong>Imported playbook SHA-256:</strong> {{ assessed_investigation.playbook_import_hash }}</p>{% endif %}
+    <dl class="audit-summary">
+      <dt>Source Wazuh alert ID</dt><dd>{{ incident.wazuh_alert_id or 'Not reported' }}</dd>
+      <dt>Wazuh rule / detection level</dt><dd>{{ incident.rule_id or 'Not reported' }} · {{ incident.rule_level if incident.rule_level is not none else 'Level not reported' }}</dd>
+      <dt>CDSS case / alert IDs</dt><dd>Case #{{ incident.id }} · Alert #{{ incident.alert_id }}</dd>
+      <dt>Wazuh rule groups</dt><dd>{{ incident.rule_groups or 'Not reported' }}</dd>
+      <dt>Correlation</dt><dd>{{ audit.correlation }}</dd>
+      <dt>Initial priority model</dt><dd>{{ initial_priority.initial_priority_model_version if initial_priority else 'Not recorded' }}</dd>
+      <dt>Assessment model</dt><dd>{{ contextual.methodology_version if contextual else 'Not recorded' }}</dd>
+      <dt>Saved execution</dt><dd>{{ contextual.investigation_id if contextual else 'Not recorded' }}{% if assessed_investigation %} · {{ assessed_investigation.started_at|db_time }}{% endif %}</dd>
+      {% if latest_archive %}<dt>Archive retrieval</dt><dd>Execution #{{ latest_archive.investigation_id }} · {{ latest_archive.retrieval_status|title }} · {{ latest_archive.window_start|source_time('Window unavailable') }} to {{ latest_archive.window_end|source_time('Window unavailable') }}</dd>{% endif %}
+    </dl>
+    <details><summary>View Raw Wazuh Record</summary>
+      <p>Only allowlisted source fields are shown; the complete original record remains in the database.</p>
+      {% for alert in timeline %}<div class="audit-entry"><strong>{{ alert.event_timestamp|source_time }} · {{ alert.rule_description or 'Wazuh alert' }}</strong>{% if alert.raw_excerpt %}<pre class="investigation-value">{{ alert.raw_excerpt }}</pre>{% else %}<p>No safe source excerpt available.</p>{% endif %}</div>{% else %}<p>No linked alert record.</p>{% endfor %}
+    </details>
+    <details><summary>View Structured Evidence</summary>
+      {% if investigations %}{% for finding in investigations[0].findings %}<details><summary>{{ finding.display_label }} · {{ finding.finding_status|replace('_',' ')|title }}</summary><p>{{ finding.rationale }}</p><pre class="investigation-value">{{ finding.value_display }}</pre></details>{% else %}<p>No structured findings in the latest investigation.</p>{% endfor %}{% else %}<p>No investigation has been run.</p>{% endif %}
+    </details>
+    <details><summary>Mapping provenance</summary>
+      {% for alert in timeline %}<p>Wazuh alert {{ alert.wazuh_alert_id or 'ID not reported' }}: {% for mapping in alert.mitre %}{{ mapping.technique_id }} · {{ 'Wazuh' if mapping.mapping_source == 'wazuh' else 'Approved supplementary mapping' if mapping.mapping_source == 'supplementary' else 'Source unavailable' }}{{ '; ' if not loop.last }}{% else %}Not Mapped{% endfor %}</p>{% else %}<p>No linked alert mapping records.</p>{% endfor %}
+    </details>
+    <details><summary>Investigation History</summary>
+      {% for execution in investigations[1:] %}<p>{{ execution.display_method }} · {{ execution.status|title }} · Started {{ execution.started_at|db_time }} · Completed {{ execution.completed_at|db_time('Not completed') }}</p>{% else %}<p>No earlier investigations.</p>{% endfor %}
+    </details>
+    <details><summary>Assessment History</summary>
+      {% for assessment in assessments %}<p>{{ assessment.assessed_at|db_time }} · {{ assessment.assessment_stage|replace('_',' ')|title }} · Evidence: {{ assessment.evidence_state or 'Not assigned' }} · Risk: {{ assessment.risk_level|title if assessment.risk_level else 'Unassessed' }} · Confidence: {{ assessment.confidence|title }}</p>{% else %}<p>No assessments recorded.</p>{% endfor %}
+    </details>
+  </div>
+</details>
 {% endblock %}

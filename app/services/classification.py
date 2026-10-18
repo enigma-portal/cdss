@@ -3,7 +3,7 @@
 import re
 
 
-MITRE_ID_PATTERN = re.compile(r"^T\d{4}(?:\.\d{3})?$")
+MITRE_ID_PATTERN = re.compile(r"^T[0-9]{4}(?:\.[0-9]{3})?$")
 
 # Project-defined fallback mappings. These keys are limited to Wazuh groups
 # observed in the project's alert fixtures/lab data; they are not MITRE claims.

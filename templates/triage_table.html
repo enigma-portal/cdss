@@ -1,0 +1,11 @@
+{% macro triage_table(items) %}
+{% if items %}<div class="table-wrap"><table class="context-table"><thead><tr><th>Case / status</th><th>Configured CDSS asset</th><th>Evidence state</th><th>CDSS contextual risk</th><th>Assessment confidence</th><th>Analyst review</th></tr></thead>
+<tbody>{% for item in items %}<tr>
+<td data-label="Case / status"><a class="incident-link" href="{{ url_for('dashboard.incident_detail',incident_id=item.id) }}">#{{ item.id }} · {{ item.title }}</a><small>{{ item.status|title }} · {{ (item.last_activity_at or item.detected_at)|source_time }}</small></td>
+<td data-label="Configured CDSS asset">{{ item.asset_name or 'Not mapped' }}{% if item.asset_id %}<small>Criticality: {{ item.criticality|title }}{% if not item.is_protected %} · Outside assessment scope{% endif %}</small>{% endif %}</td>
+<td data-label="Evidence state">{{ item.evidence_state or 'Not Yet Assessed' }}</td>
+<td data-label="CDSS contextual risk">{% if item.assessment_id %}<span class="badge {{ item.risk_level or '' }}">{{ item.risk_display|title }}</span>{% else %}<span>CDSS Assessment: Pending Investigation</span>{% endif %}</td>
+<td data-label="Assessment confidence">{{ item.confidence|title if item.confidence else 'Not assessed' }}</td>
+<td data-label="Analyst review">{% if item.further_review %}Further Investigation Required{% elif item.pending_recommendations %}{{ item.pending_recommendations }} recommendations awaiting review{% elif not item.decision %}No decision recorded{% else %}Current guidance reviewed{% endif %}{% if item.decision %}<small>Latest: {{ item.decision|replace('_',' ')|title }}</small>{% endif %}</td>
+</tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state"><p>No investigation cases in this view.</p></div>{% endif %}
+{% endmacro %}

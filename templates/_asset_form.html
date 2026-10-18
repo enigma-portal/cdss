@@ -13,7 +13,7 @@
   <label>Wazuh agent ID <input name="wazuh_agent_id" maxlength="64" value="{{ asset.wazuh_agent_id or '' if asset else request.form.get('wazuh_agent_id','') }}" placeholder="Optional; exact match only"></label>
 </div>
 <label>Business criticality <select name="criticality" required><option value="">Select explicitly</option>{% for item in criticalities %}<option value="{{ item }}"{% if (asset and asset.criticality == item) or request.form.get('criticality') == item %} selected{% endif %}>{{ item|title }}</option>{% endfor %}</select></label>
-<label class="check-label"><input type="checkbox" name="is_protected" value="1"{% if (asset and asset.is_protected) or (not asset and request.form.get('is_protected')) %} checked{% endif %}> Protected asset participating in future contextual assessment</label>
+<label class="check-label"><input type="checkbox" name="is_protected" value="1"{% if (asset and asset.is_protected) or (not asset and request.form.get('is_protected')) %} checked{% endif %}> Include this asset in contextual assessment scope</label>
 <label>Description <textarea name="description" maxlength="2000" rows="4">{{ asset.description or '' if asset else request.form.get('description','') }}</textarea></label>
 <script type="application/json" id="asset-catalogue">{{ catalogue|tojson }}</script>
 <script src="{{ url_for('static', filename='js/assets.js') }}" defer></script>

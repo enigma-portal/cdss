@@ -16,12 +16,21 @@ from app.services.recommendation_engine import backfill_recommendations
 from config import PROJECT_TITLE
 
 load_local_environment()
+from app.time_utils import register_timestamp_filters
+
 app = Flask(__name__)
+register_timestamp_filters(app)
 app.config["PROJECT_TITLE"] = PROJECT_TITLE
 app.config["APP_BUILD"] = "2026.08.24-engine2"
 app.config["SIEM_REALTIME_ENABLED"] = (
     os.getenv("CDSS_REALTIME_ENABLED", "true").lower() == "true"
 )
+# Analyst-facing alert grouping only; not the incident correlation window.
+app.config["ALERT_GROUP_WINDOW_MINUTES"] = os.getenv("CDSS_ALERT_GROUP_WINDOW_MINUTES", "60")
+app.config["INVESTIGATION_EVIDENCE_BUFFER_MINUTES"] = os.getenv(
+    "CDSS_INVESTIGATION_EVIDENCE_BUFFER_MINUTES", "10")
+app.config["INVESTIGATION_MAX_ARCHIVE_EVENTS"] = os.getenv(
+    "CDSS_INVESTIGATION_MAX_ARCHIVE_EVENTS", "200")
 secret_file = Path(__file__).resolve().parent / "data" / "session.key"
 secret_file.parent.mkdir(parents=True, exist_ok=True)
 if not secret_file.exists():
@@ -39,17 +48,23 @@ app.register_blueprint(auth)
 app.register_blueprint(dashboard)
 app.register_blueprint(assets)
 
-# Make sure the local SQLite database is ready whenever the app starts.
-initialize_database()
-seed_knowledge_base()
-with app.app_context():
-    from app.database import get_db_connection
-    connection = get_db_connection()
-    try:
-        with connection:
-            backfill_recommendations(connection)
-    finally:
-        connection.close()
+def prepare_runtime():
+    """Initialize storage and claim the collection worker at an explicit entry point.
+
+    Importing ``app`` for an isolated test must never mutate the main database
+    or start a network poller. Both supported server entry points call this.
+    """
+    initialize_database()
+    seed_knowledge_base()
+    with app.app_context():
+        from app.database import get_db_connection
+        connection = get_db_connection()
+        try:
+            with connection:
+                backfill_recommendations(connection)
+        finally:
+            connection.close()
+    start_realtime_poller(app.config['SIEM_REALTIME_ENABLED'])
 
 
 @app.after_request
@@ -67,7 +82,7 @@ def secure_headers(response):
 if __name__ == "__main__":
     try:
         acquire_server_lock()
-        start_realtime_poller(app.config["SIEM_REALTIME_ENABLED"])
+        prepare_runtime()
         app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False)
     except AlreadyRunningError as error:
         print(error)
