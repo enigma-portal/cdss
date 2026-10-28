@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<a class="back" href="{{ url_for('dashboard.alerts') }}">← Back to grouped alerts</a>
+<a class="back" href="{{ url_for('dashboard.alerts') }}">← Back to detections</a>
 <section class="panel detail-card analyst-section">
   <p class="eyebrow">{{ 'EXISTING INVESTIGATION CASE ALERT SET' if group.existing_case_membership else 'GROUPED WAZUH DETECTION' }}</p>
   <h1>Alert Summary</h1>
@@ -34,7 +34,7 @@
     </dl>{% else %}<dl class="source-facts"><dt>Asset</dt><dd>Not mapped</dd><dt>Asset criticality</dt><dd>Unavailable</dd><dt>Contextual assessment scope</dt><dd>Unavailable — administrator configuration required</dd></dl><p>Unassessed because no mapped asset/criticality/assessment scope is available.</p>{% endif %}
   </section>
 </div>
-<section class="panel detail-card analyst-section"><h2>Event Network Context</h2><dl class="summary-facts">{% for field,label in [('source_ip','Network Source IP'),('destination_ip','Network Destination IP'),('username','Account')] %}{% set values=group.members|map(attribute=field)|select|unique|list %}<div><dt>{{ label }}</dt><dd>{{ values|join(', ') if values else 'Not present in this event evidence.' }}</dd></div>{% endfor %}</dl></section>
+<section class="panel detail-card analyst-section"><h2>Event Network Context</h2><dl class="summary-facts">{% for field,label in [('source_ip','Network Source IP'),('destination_ip','Network Destination IP'),('username','Account')] %}{% set values=group.members|map(attribute=field)|select|unique|list %}<div><dt>{{ label }}</dt><dd>{{ values|map('network_label')|join(', ') if values else 'Not present in this event evidence.' }}</dd></div>{% endfor %}</dl></section>
 <section class="panel detail-card analyst-section">
   <h2>Occurrence Summary</h2>
   <dl class="summary-facts">
@@ -45,6 +45,7 @@
 </section>
 <section class="panel detail-card analyst-section">
   <h2>Investigation</h2>
+  {% if group.prior_matching_case_id %}<p>New matching alerts arrived after <a href="{{ url_for('dashboard.incident_detail', incident_id=group.prior_matching_case_id) }}">Case #{{ group.prior_matching_case_id }}</a>. They form a new investigation trigger; the earlier case membership remains unchanged.</p>{% endif %}
   <p>Reviewing this alert does not start an investigation. Investigate opens the grouped case, collects available supporting evidence, runs the selected evidence checks, and prepares an analyst-reviewed contextual assessment.</p>
   {% if group.active_case_id %}
   <p><a class="button secondary" href="{{ url_for('dashboard.incident_detail', incident_id=group.active_case_id) }}">Open Investigation</a></p>
@@ -62,7 +63,7 @@
       <tbody>{% for member in group.members %}<tr>
         <td data-label="Event time">{{ member.event_timestamp|source_time }}</td>
         <td data-label="Wazuh alert ID"><a href="{{ url_for('dashboard.alert_detail', alert_id=member.id) }}">{{ member.wazuh_alert_id or ('CDSS alert #' ~ member.id) }}</a></td>
-        {% if group.has_source_ip %}<td data-label="Network Source IP">{{ member.source_ip or 'Not provided' }}</td>{% endif %}
+        {% if group.has_source_ip %}<td data-label="Network Source IP">{{ member.source_ip|network_label or 'Not provided' }}</td>{% endif %}
         {% if group.has_username %}<td data-label="Account">{{ member.username or 'Not provided' }}</td>{% endif %}
         {% if group.has_destination_ip %}<td data-label="Network Destination IP">{{ member.destination_ip or 'Not provided' }}</td>{% endif %}
         <td data-label="Linked case">{% if member.incident_id %}<a href="{{ url_for('dashboard.incident_detail', incident_id=member.incident_id, group_alert=group.representative_alert_id) }}">#{{ member.incident_id }}</a>{% else %}None{% endif %}</td>

@@ -26,6 +26,16 @@ ARCHIVE_PLAYBOOK = 'wazuh_archive_retrieval_v1'
 ARCHIVE_INDEX = 'wazuh-archives-*'
 DEFAULT_BUFFER_MINUTES = 10
 DEFAULT_MAX_EVENTS = 200
+
+
+def archive_coverage(run, cross=False):
+    """Coverage is distinct from observation presence and retrieval availability."""
+    prefix = 'cross_' if cross else ''
+    if not run or run.get(prefix + 'retrieval_status') not in ('available', 'empty'):
+        return 'unavailable'
+    return 'partial' if run.get(prefix + 'truncated') else 'complete'
+
+
 FIELD_CANDIDATES = ('timestamp', '@timestamp', 'agent.id', 'agent.id.keyword')
 SOURCE_FIELDS = (
     'id', 'timestamp', '@timestamp', 'agent.id', 'agent.name', 'rule.id',
@@ -34,7 +44,11 @@ SOURCE_FIELDS = (
     'data.win.eventdata.ipAddress', 'data.win.eventdata.targetUserName',
     'data.win.eventdata.sourceIp', 'data.win.eventdata.destinationIp',
     'data.win.system.eventID', 'data.win.system.eventId',
-    'data.win.eventdata.processName', 'data.win.eventdata.parentProcessName',
+    'data.win.system.providerName', 'data.win.system.channel',
+    'data.win.eventdata.utcTime', 'data.win.eventdata.processGuid',
+    'data.win.eventdata.destinationPort',
+    'data.win.eventdata.processName', 'data.win.eventdata.newProcessName',
+    'data.win.eventdata.parentProcessName',
     'data.win.eventdata.image', 'data.win.eventdata.parentImage',
     'data.win.eventdata.targetFilename', 'data.win.eventdata.user',
     'data.win.eventdata.processId', 'data.win.eventdata.commandLine',
@@ -43,6 +57,11 @@ SOURCE_FIELDS = (
     'syscheck.md5_after', 'syscheck.sha256_after',
 )
 SELECTED_FIELDS = {
+    'provider_name': ('data.win.system.providerName',),
+    'channel': ('data.win.system.channel',),
+    'utc_time': ('data.win.eventdata.utcTime',),
+    'process_guid': ('data.win.eventdata.processGuid',),
+    'destination_port': ('data.win.eventdata.destinationPort',),
     'source_alert_id': ('id',),
     'rule_id': ('rule.id',),
     'rule_description': ('rule.description',),
@@ -108,6 +127,12 @@ def _selected(source):
             if value is not None:
                 selected[label] = value
                 break
+    # Security 4688 names the newly created process differently from Sysmon.
+    # Retain existing explicit aliases; use this only for its actual event type.
+    if selected.get('event_id') == '4688' and 'process_name' not in selected:
+        process = _text(_field(source, 'data.win.eventdata.newProcessName'), 256)
+        if process is not None:
+            selected['process_name'] = process
     groups = _field(source, 'rule.groups')
     if isinstance(groups, list) and len(groups) <= 32 and all(
             isinstance(group, str) and 0 < len(group) <= 64 for group in groups):

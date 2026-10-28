@@ -144,7 +144,7 @@ def imported_definition(key):
 
 
 def _values(value):
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, (list, tuple, set, frozenset)):
         return {str(item).strip() for item in value if isinstance(item, (str, int)) and str(item).strip()}
     if isinstance(value, (str, int)) and str(value).strip():
         return {str(value).strip()}

@@ -2,7 +2,7 @@
 {% from "triage_table.html" import triage_table %}
 {% block content %}
 
-<section class="panel"><div class="panel-heading"><div><p class="eyebrow">CONTEXTUAL TRIAGE</p><h2>Investigation cases</h2><p>Wazuh detections are listed separately under <a href="{{ url_for('dashboard.alerts') }}">Alerts</a>.</p></div><div class="filter-state"><span>{{ pagination.active_label }}</span><p>{{ pagination.total }} matching</p></div></div>
+<section class="panel"><div class="panel-heading"><div><p class="eyebrow">CONTEXTUAL TRIAGE</p><h2>Investigation cases</h2><p>Wazuh detections are listed separately under <a href="{{ url_for('dashboard.alerts') }}">Detections</a>.</p></div><div class="filter-state"><span>{{ pagination.active_label }}</span><p>{{ pagination.total }} matching</p></div></div>
 <details class="detail-card" open><summary>Filter investigations</summary><form class="filters contextual-filters" method="get" action="{{ url_for('dashboard.incidents') }}">
 <label>Search<input name="q" value="{{ pagination.q }}" maxlength="100" placeholder="Incident, asset, rule, account…"></label>
 {% for key,label,options in [('severity','CDSS contextual risk',['critical','high','medium','low','unassessed']),('status','Case status',['open','investigating','contained','closed']),('criticality','Current asset criticality',['low','medium','high','critical','unmapped']),('evidence','Evidence state',['T1','T2','T3','T4','Inconclusive']),('decision','Latest recorded decision',['accept','reject','further_investigation_required','pending']),('confidence','Assessment confidence',['low','medium','high','unavailable'])] %}

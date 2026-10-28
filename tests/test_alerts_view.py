@@ -80,7 +80,7 @@ class AlertsViewTests(unittest.TestCase):
         self.assertLess(detail.index('Reported Wazuh Source'), detail.index('Configured CDSS Asset'))
         self.assertIn('Agent ID</dt><dd>001', detail)
         self.assertIn('Administrator-defined criticality', detail)
-        self.assertIn('Review Grouped Alert', detail)
+        self.assertIn('Review related detection', detail)
         self.assertNotIn('RAW-ONLY-SECRET', detail)
 
     def test_status_progression_uses_existing_saved_records(self):

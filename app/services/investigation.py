@@ -6,11 +6,12 @@ require timezone-aware timestamps, a shared account/source and no conflicting
 known account/source. 'Not observed' means within this evidence snapshot only.
 """
 import json
+from app.services.evidence_context import is_sysmon, is_loopback
 from datetime import datetime, timezone
 
 from app.database import get_db_connection
 from app.services.alert_parser import stored_reported_account, stored_reported_source_ip, stored_reported_destination_ip
-from app.services.archive_evidence import _selected
+from app.services.archive_evidence import _selected, archive_coverage
 from app.services.incident_correlation import event_time
 from app.services.mitre_mapping import get_alert_mitre_context
 from app.services.playbook_registry import (
@@ -98,6 +99,25 @@ def _archive_row_as_alert(row, incident, trigger_agent_id):
                            'source_document_id':row['source_document_id']})
 
 
+def _source_observation_key(alert):
+    """Cross-source equivalence, never a source-ID-only archive identity.
+
+    A trigger/archive copy must match the agent, UTC instant, event type and
+    complete normalized evidence. Missing time/source identity cannot prove a
+    copy. Distinct archive documents remain distinct even if these fields agree.
+    """
+    observed = event_time(alert.get('event_timestamp'))
+    fields = _summary(alert).get('source_fields')
+    if (observed is None or not alert.get('agent_id') or not isinstance(fields, dict)
+            or not fields.get('source_alert_id')):
+        return None
+    event_type = fields.get('event_id') or fields.get('rule_id')
+    if not event_type:
+        return None
+    return (alert['agent_id'], observed, event_type,
+            json.dumps(fields, sort_keys=True, ensure_ascii=True, allow_nan=False))
+
+
 def _archive_alerts(connection, incident, alerts):
     """Snapshot real records from the latest bounded retrieval for evaluation."""
     run = connection.execute('''SELECT r.investigation_id,r.retrieval_status
@@ -106,7 +126,8 @@ def _archive_alerts(connection, incident, alerts):
         (incident['id'],)).fetchone()
     if not run or run['retrieval_status'] not in ('available','empty') or not alerts:
         return []
-    known_source_ids = {a['wazuh_alert_id'] for a in alerts if a['wazuh_alert_id']}
+    trigger_observations = {key for a in alerts if (key := _source_observation_key(a)) is not None}
+    seen_documents = set()
     result = []
     for row in connection.execute('''SELECT * FROM investigation_archive_evidence
         WHERE investigation_id=? ORDER BY id''',(run['investigation_id'],)):
@@ -114,7 +135,14 @@ def _archive_alerts(connection, incident, alerts):
             alert = _archive_row_as_alert(row,incident,alerts[0]['agent_id'])
         except (ValueError,TypeError):
             continue
-        if alert['wazuh_alert_id'] in known_source_ids:
+        document = (row['source_index'], row['source_document_id'])
+        if document in seen_documents:
+            continue
+        seen_documents.add(document)
+        # The source ID is reused by Wazuh archives. Only an equivalent
+        # trigger observation is a redundant cross-source representation.
+        key = _source_observation_key(alert)
+        if key is not None and key in trigger_observations:
             continue
         result.append(alert)
     return result
@@ -126,17 +154,24 @@ def _file_events(alerts):
     for alert in alerts:
         groups = _groups(alert) if 'raw_alert' in alert else set(alert.get('rule_groups') or [])
         fields = _summary(alert)['source_fields'] if 'raw_alert' in alert else alert.get('source_fields', {})
-        if not isinstance(fields, dict) or groups is None:
+        if not isinstance(fields, dict):
             continue
+        if groups is None:
+            if not is_sysmon(fields):
+                continue
+            groups = set()
         event_id = fields.get('event_id')
+        # Exact provider/channel metadata supports archive-only Sysmon records.
+        # Do not synthesize or alter the source's Wazuh rule groups.
+        sysmon = 'sysmon' in groups or is_sysmon(fields)
         if ('sysmon_eid11_detections' in groups or
-                ('sysmon' in groups and event_id == '11')) and fields.get('file_path') and event_id in (None, '11'):
+                (sysmon and event_id == '11')) and fields.get('file_path') and event_id in (None, '11'):
             kind = 'file'
         elif ('sysmon_eid1_detections' in groups or
-              ('sysmon' in groups and event_id == '1')) and fields.get('process_name') and event_id in (None, '1'):
+              (sysmon and event_id == '1')) and fields.get('process_name') and event_id in (None, '1'):
             kind = 'process'
         elif ('sysmon_eid3_detections' in groups or
-              ('sysmon' in groups and event_id == '3')) and fields.get('destination_ip') and event_id in (None, '3'):
+              (sysmon and event_id == '3')) and fields.get('destination_ip') and event_id in (None, '3'):
             kind = 'network'
         elif 'syscheck' in groups and fields.get('file_path'):
             kind = 'integrity'
@@ -171,6 +206,8 @@ def _remote_events(alerts):
         if not outcome or not (windows or ssh):
             continue
         source = alert.get('source_ip') or fields.get('source_ip')
+        if is_loopback(source):
+            continue
         account = alert.get('username') or fields.get('username')
         if not source and not account:
             continue
@@ -313,22 +350,25 @@ def _build_findings(connection, incident, alerts, playbook):
             'observed', 'No dedicated structured source context matched. '
             'Generic evidence review only; no automated security conclusion.', alerts))
     if playbook in (AUTH, FILE_PROCESS, REMOTE_ACCESS):
-        archive = connection.execute('''SELECT r.investigation_id,r.retrieval_status,r.retrieved_count,r.truncated,
+        archive = connection.execute('''SELECT r.investigation_id,r.retrieval_status,r.retrieved_count,r.truncated,r.total_hits,
             r.cross_retrieval_status,r.cross_retrieved_count,r.cross_truncated
             FROM investigation_archive_runs r JOIN investigations i ON i.id=r.investigation_id
             WHERE i.incident_id=? ORDER BY r.investigation_id DESC LIMIT 1''',
             (incident['id'],)).fetchone()
         detail = dict(archive) if archive else None
+        if detail:
+            detail['coverage'] = archive_coverage(detail)
+            detail['cross_coverage'] = archive_coverage(detail, cross=True)
         status = ('observed' if archive and archive['retrieval_status'] == 'available'
-                  and archive['retrieved_count'] > 0 and not archive['truncated'] else
+                  and archive['retrieved_count'] > 0 else
                   'not_observed' if archive and archive['retrieval_status'] == 'empty'
                   and not archive['truncated'] else 'unavailable')
         findings.append(_finding('archive_coverage', 'context', detail, status,
             'Only a completed bounded empty search means no archive events were observed '
-            'in that window. Missing, failed or truncated retrieval is unavailable; '
+            'in that window. Truncated retrieval is partial coverage; missing or failed retrieval is unavailable; '
             'an empty result does not establish benign activity.'))
         cross_status=('observed' if archive and archive['cross_retrieval_status']=='available'
-                      and archive['cross_retrieved_count'] and archive['cross_truncated']==0 else
+                      and archive['cross_retrieved_count'] else
                       'not_observed' if archive and archive['cross_retrieval_status']=='empty' and archive['cross_truncated']==0
                       else 'unavailable')
         findings.append(_finding('cross_system_coverage','context',detail,cross_status,

@@ -1,10 +1,12 @@
 """Dashboard reads and explicit, CSRF-protected evidence investigation execution."""
 
 
-from flask import Blueprint, abort, render_template, request, redirect, url_for, flash, current_app, g
+from flask import Blueprint, abort, render_template, request, redirect, url_for, flash, current_app, g, session
 
 from app.database import get_db_connection
-from app.auth import login_required, validate_csrf
+from app.auth import login_required, admin_required, validate_csrf
+from app.services.triage import triage_page, triage_overview, family_children, filter_options
+from app.services.alert_retention import preview_retention, purge_retention
 from app.services.investigation import run_investigation, investigation_history
 from app.services.contextual_risk import (
     assess_investigation, create_initial_assessment, assessment_history, current_assessment,
@@ -14,10 +16,10 @@ from app.services.contextual_recommendations import (
 )
 
 from app.services.dashboard_context import (
-    overview_data, list_data, incident_evidence, assessment_notices, incident_presentation,
+    list_data, incident_evidence, assessment_notices, incident_presentation,
     recommendation_presentation, audit_presentation,
 )
-from app.services.alert_view import alert_detail_data, group_context, list_alerts, source_label
+from app.services.alert_view import alert_detail_data, group_context, source_label
 from app.services.archive_evidence import (
     archive_run_detail, archive_runs_for_case, start_group_archive_retrieval,
 )
@@ -26,7 +28,14 @@ dashboard = Blueprint("dashboard", __name__)
 @dashboard.route("/")
 @login_required
 def index():
-    return render_template("overview.html", overview=overview_data())
+    connection = get_db_connection()
+    try:
+        period = request.args.get('period', '24h')
+        if period not in ('15m', '1h', '24h'):
+            period = '24h'
+        return render_template("overview.html", triage=triage_overview(connection, period))
+    finally:
+        connection.close()
 
 
 @dashboard.route("/alerts")
@@ -34,8 +43,59 @@ def index():
 def alerts():
     connection = get_db_connection()
     try:
-        items, pagination = list_alerts(connection, request.args)
-        return render_template("alerts.html", alerts=items, pagination=pagination)
+        items, pagination = triage_page(connection, request.args)
+        return render_template("alerts.html", alerts=items, pagination=pagination,
+                               filter_options=filter_options(connection))
+    finally:
+        connection.close()
+
+
+@dashboard.route('/alerts/families/<int:alert_id>')
+@login_required
+def alert_family(alert_id):
+    connection = get_db_connection()
+    try:
+        family = family_children(connection, alert_id, request.args)
+        if family is None:
+            abort(404)
+        if family['total'] == 1 and family['items']:
+            return redirect(url_for('dashboard.alert_group_detail',
+                                    alert_id=family['items'][0]['representative_alert_id']))
+        return render_template('alert_family.html', family=family, alert_id=alert_id)
+    finally:
+        connection.close()
+
+
+@dashboard.route('/admin/alert-retention', methods=['GET','POST'])
+@admin_required
+def alert_retention():
+    values = {key: request.form.get(key, '') for key in ('from','to','agent','status')}
+    preview = None
+    connection = get_db_connection()
+    try:
+        if request.method == 'POST':
+            validate_csrf()
+            try:
+                if request.form.get('action') == 'purge':
+                    if request.form.get('confirm') != 'yes':
+                        raise ValueError('Explicit confirmation is required.')
+                    if not session.get('retention_preview_token') or session['retention_preview_token'] != request.form.get('preview_token'):
+                        raise ValueError('Preview this selection before confirming deletion.')
+                    result = purge_retention(connection, values, g.user['id'], request.form.get('preview_token',''))
+                    session.pop('retention_preview_token', None)
+                    flash(f"Deleted {result['eligible']} unlinked alerts; {result['protected']} protected/skipped.", 'success')
+                    return redirect(url_for('dashboard.alert_retention'))
+                preview = preview_retention(connection, values)
+                session['retention_preview_token'] = preview['token']
+            except ValueError as error:
+                flash(str(error), 'error')
+            except Exception:
+                current_app.logger.error('Alert retention failed; transaction rolled back')
+                flash('Retention failed. No partial deletion was saved.', 'error')
+        audit = connection.execute('''SELECT a.*,u.username FROM alert_retention_audit a
+            JOIN users u ON u.id=a.actor_user_id ORDER BY a.id DESC LIMIT 20''').fetchall()
+        return render_template('alert_retention.html', values=values, preview=preview, audit=audit,
+                               filter_options=filter_options(connection))
     finally:
         connection.close()
 
@@ -193,10 +253,13 @@ def incident_detail(incident_id):
             item.update(recommendation_presentation(item,asset,timeline,contextual,assessed_investigation))
         notices=assessment_notices(connection,incident_id,contextual,asset_row)
         presentation=incident_presentation(dict(incident),asset,timeline,investigations,contextual,notices)
+        from app.services.evidence_progression import evidence_progression
+        progression=evidence_progression(contextual,assessed_investigation)
+        current_guidance=[item for item in current_guidance if item['rule_key'] != 'confirm_asset_scope']
         return render_template("incident_detail.html", incident=dict(incident),
                                reported_system=source_label(incident['agent_id'], incident['agent_name']),
                                techniques=techniques, asset=asset, timeline=timeline,
-                               investigations=investigations, presentation=presentation, audit=audit,
+                               investigations=investigations, presentation=presentation, audit=audit, progression=progression,
                                archive_runs=archive_runs,
                                latest_archive=latest_archive,selected_playbook=selected_playbook,
                                assessed_investigation=assessed_investigation,

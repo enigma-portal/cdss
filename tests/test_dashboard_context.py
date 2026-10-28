@@ -25,7 +25,7 @@ class ContextualDashboardTests(unittest.TestCase):
             {'finding_key': 'asset_context', 'finding_status': 'observed',
              'finding_value': '{"id": 1}'},
             {'finding_key': 'file_process_events', 'finding_status': 'observed',
-             'finding_value': json.dumps([{'kind': 'file', 'file_path': 'C:/Temp/sample.ps1'}])},
+             'finding_value': json.dumps([{'alert_id': 1, 'kind': 'file', 'file_path': 'C:/Temp/sample.ps1'}])},
         ]}
         newer = {'id': 11, 'playbook_key': 'generic_evidence_review_v1', 'findings': [
             {'finding_key': 'no_specific_playbook', 'finding_status': 'observed',
@@ -33,7 +33,7 @@ class ContextualDashboardTests(unittest.TestCase):
         ]}
         contextual = {'investigation_id': 10, 'evidence_state': 'T1',
                       'asset_criticality_snapshot': None, 'risk_level': None,
-                      'inputs_snapshot': json.dumps({'evidence_reason':
+                      'inputs_snapshot': json.dumps({'decisive_evidence_ids': [1], 'evidence_reason':
                           'One file/process observation is traceable, without related corroboration.'})}
         timeline = [{'id': 1, 'rule_description': 'File alert', 'source_ip': None,
                      'username': None}]
@@ -104,7 +104,7 @@ class ContextualDashboardTests(unittest.TestCase):
         client=self.client()
         response=client.get(f'/incidents/{incident}')
         self.assertIn(b'Configured asset',response.data)
-        self.assertIn(b'Current asset criticality',response.data)
+        self.assertIn(b'<dt>Criticality</dt>',response.data)
         self.assertIn(b'Asset Criticality Used',response.data)
         self.assertIn(b'Asset context has changed',response.data)
         rows=list_data({'criticality':'low'})[1]
@@ -178,7 +178,7 @@ class ContextualDashboardTests(unittest.TestCase):
         record_analyst_decision(incident,assessment['id'],ids[0],uid,'accept','First decision')
         record_analyst_decision(incident,assessment['id'],ids[0],uid,'further_investigation_required','<script>unsafe()</script>')
         html=client.get(f'/incidents/{incident}').data
-        for expected in (b'Investigation Findings',b'Investigation Approach',b'Recommended Actions',
+        for expected in (b'Key Findings',b'Investigation Approach',b'Recommended Follow-up',
                          b'Decision History',b'First decision',b'&lt;script&gt;unsafe()',b'Audit Summary'):
             self.assertIn(expected,html)
         self.assertNotIn(b'Legacy numeric score',html)
@@ -310,9 +310,12 @@ class ContextualDashboardTests(unittest.TestCase):
             response = client.get(route)
             self.assertEqual(response.status_code, 200)
             html = response.get_data(as_text=True)
-            for text in ('Wazuh Agent ID', '002', 'Not mapped', 'Asset criticality',
-                         'Contextual assessment scope', 'Unavailable',
-                         'Unassessed because no mapped asset/criticality/assessment scope is available.'):
+            labels = (('Criticality', 'Saved Contextual Risk', 'Current Risk Assessment Setting',
+                       'Unassessed because no mapped asset/criticality is available.')
+                      if route.startswith('/incidents/') else
+                      ('Asset criticality', 'Contextual assessment scope',
+                       'Unassessed because no mapped asset/criticality/assessment scope is available.'))
+            for text in ('Wazuh Agent ID', '002', 'Not mapped', 'Unavailable') + labels:
                 self.assertIn(text, html)
         self.assertEqual(before, [tuple(r) for r in self.db.execute('SELECT * FROM assets ORDER BY id')])
 
@@ -322,7 +325,7 @@ class ContextualDashboardTests(unittest.TestCase):
         client=self.client()
         verified=client.get(f'/incidents/{incident}').data.decode()
         self.assertIn('Source artifact:',verified)
-        primary, audit = verified.split('<details class="panel detail-card" id="technical-details">', 1)
+        primary, audit = verified.split('<details class="secondary-section" id="technical-details">', 1)
         saved_hash = self.db.execute('SELECT playbook_import_hash FROM investigations WHERE id=?',
                                     (assessment['investigation_id'],)).fetchone()[0]
         self.assertNotIn(saved_hash, primary)
@@ -361,8 +364,8 @@ class ContextualDashboardTests(unittest.TestCase):
         actions=html.split('id="contextual-guidance"',1)[1].split('id="analyst-decision"',1)[0]
         for row in current:
             self.assertEqual(actions.count(str(escape(row['action_text']))),1)
-        self.assertIn('<details class="panel detail-card" id="technical-details">',html)
-        self.assertLess(html.index('id="related-evidence"'),html.index('id="investigation"'))
+        self.assertIn('<details class="secondary-section" id="technical-details">',html)
+        self.assertLess(html.index('id="investigation"'),html.index('id="related-evidence"'))
 
     def test_non_ascii_csrf_rejected_without_internal_error(self):
         client=self.client()
@@ -408,14 +411,16 @@ class ContextualDashboardTests(unittest.TestCase):
             self.db.execute("UPDATE assets SET asset_name='Current configured asset',criticality='medium' WHERE id=?",(configured,))
             self.db.execute('UPDATE incidents SET asset_id=? WHERE id=?',(configured,incident))
         html=self.client().get(f'/incidents/{incident}').data.decode()
-        primary,audit=html.split('<details class="panel detail-card" id="technical-details">',1)
-        self.assertEqual(primary.count('class="panel detail-card analyst-section"'),7)
-        for heading in ('Investigation Trigger','Supporting Evidence','Investigation Findings',
-                        'Evidence Strength','Contextual Risk + Confidence',
-                        'Recommended Actions','Analyst Decision'):
+        primary,audit=html.split('<details class="secondary-section" id="technical-details">',1)
+        sections = ('incident-summary','contextual-assessment','contextual-guidance','analyst-decision',
+                    'conclusion','investigation-details')
+        self.assertEqual(sorted(sections, key=lambda value: primary.index('id="'+value+'"')), list(sections))
+        for heading in ('Incident Summary','Supporting Evidence','Key Findings',
+                        'Evidence State','Saved Contextual Risk',
+                        'Recommended Follow-up','Analyst Decision'):
             self.assertIn(heading,primary)
         self.assertIn('Current configured asset',primary)
-        self.assertIn('Current asset criticality',primary)
+        self.assertIn('<dt>Criticality</dt>',primary)
         self.assertIn('Asset Criticality Used',primary)
         self.assertIn('Unavailable in saved assessment',primary)
         self.assertEqual(primary.count('Asset context has changed'),1)
@@ -423,8 +428,10 @@ class ContextualDashboardTests(unittest.TestCase):
         self.assertIn('Generic Evidence Review',primary)
         self.assertIn('Inconclusive',primary)
         self.assertIn('Unassessed',primary)
-        self.assertEqual(primary.count('T1110'),1)
-        self.assertEqual(primary.count('T1059.001'),1)
+        self.assertEqual(primary.count('T1110'),0)
+        self.assertIn('T1110',audit)
+        self.assertEqual(primary.count('T1059.001'),0)
+        self.assertIn('T1059.001',audit)
         for internal in ('Execution #','generic_evidence_review_v1','seed_migrated',
                          'cdss-contextual-v1','cdss-guidance-v1','40% Wazuh','Legacy numeric score'):
             self.assertNotIn(internal,primary)
@@ -441,9 +448,9 @@ class ContextualDashboardTests(unittest.TestCase):
         self.assess(incident)
         generate_contextual_recommendations(incident)
         html=self.client().get(f'/incidents/{incident}').data.decode()
-        audit=html.split('<details class="panel detail-card" id="technical-details">',1)[1]
+        audit=html.split('<details class="secondary-section" id="technical-details">',1)[1]
         summary=audit.split('<details>',1)[0]
-        for label in ('Source Wazuh alert ID','Wazuh rule / detection level',
+        for label in ('Source Wazuh alert ID','Wazuh rule ID','Wazuh Detection Level',
                       'CDSS case / alert IDs','Wazuh rule groups','Correlation',
                       'Initial priority model','Assessment model','Saved execution'):
             self.assertIn(label,summary)
@@ -491,10 +498,12 @@ class ContextualDashboardTests(unittest.TestCase):
         # summary above the recommendations.
         self.assertNotIn('CDSS Contextual Risk:', actions)
         self.assertNotIn('Assessment Confidence:', actions)
-        self.assertIn('<dt>CDSS Contextual Risk</dt>', html)
+        self.assertIn('<dt>Saved Contextual Risk</dt>', html)
+        self.assertIn('<dt>Current Risk Assessment Setting</dt><dd>Disabled</dd>', html)
         self.assertIn('<dt>Assessment Confidence</dt>', html)
-        self.assertIn('Confirm whether this asset belongs in contextual assessment scope',actions)
-        self.assertIn('outside contextual assessment scope',actions)
+        self.assertNotIn('Confirm whether this asset belongs in contextual assessment scope',actions)
+        self.assertNotIn('outside contextual assessment scope',actions)
+        self.assertIn('Not calculated — Risk Assessment disabled for this asset.',html)
         self.assertIn('No dedicated playbook matched',actions)
         self.assertIn('Current evidence does not support a specific response action',actions)
         self.assertNotIn('administrator-defined protected-asset context',actions)

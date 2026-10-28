@@ -101,7 +101,8 @@ class Task5GuidanceTests(unittest.TestCase):
         before = self.db.execute('SELECT status FROM incidents WHERE id=?', (incident,)).fetchone()[0]
         assessment, rows = self.guidance(incident)
         self.assertIsNone(assessment['risk_level'])
-        self.assertIn('contextual assessment scope', rows[0]['action_text'])
+        self.assertNotIn('confirm_asset_scope', {row['rule_key'] for row in rows})
+        self.assertFalse(any('contextual assessment scope' in row['action_text'] for row in rows))
         self.assertNotIn('obtain administrator-defined protected-asset context', rows[0]['action_text'])
         with self.db:
             user = self.db.execute("INSERT INTO users(username,password_hash,role,is_active) VALUES('task5-analyst','unused','analyst',1)").lastrowid

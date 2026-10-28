@@ -126,7 +126,7 @@ class ArchiveEvidenceTests(unittest.TestCase):
         self.assertNotIn('DO-NOT-COPY-RAW-ARCHIVE', html)
         case_html = analyst.get(f'/incidents/{case_id}').data.decode()
         self.assertIn('Supporting Evidence', case_html)
-        self.assertIn('Investigation Findings', case_html)
+        self.assertIn('Key Findings', case_html)
         self.assertEqual(self.db.execute('PRAGMA foreign_key_check').fetchall(), [])
 
     def test_zero_result_is_not_benign_and_does_not_create_findings(self):
@@ -211,7 +211,7 @@ class ArchiveEvidenceTests(unittest.TestCase):
                               (execution_id,)).fetchone()
         self.assertEqual(tuple(row), (2, 3, 1))
         html = self.client().get(f'/investigations/archive/{execution_id}').data.decode()
-        self.assertLess(html.index('Document earlier'), html.index('Document later'))
+        self.assertLess(html.index('<dd>earlier</dd>'), html.index('<dd>later</dd>'))
         self.assertIn('Results truncated', html)
 
     def test_alternative_mapped_fields_and_malformed_result_fail_closed(self):

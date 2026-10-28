@@ -111,6 +111,17 @@ def stored_reported_account(raw_json):
         return None
 
 
+def _sysmon_source(raw_alert):
+    from app.services.evidence_context import is_sysmon
+    rule = raw_alert.get('rule') or {}
+    data = raw_alert.get('data')
+    win = data.get('win') if isinstance(data, dict) else None
+    system = win.get('system') if isinstance(win, dict) else None
+    return (isinstance(rule, dict) and 'sysmon' in (rule.get('groups') or [])) or (
+        isinstance(system, dict) and is_sysmon({
+            'provider_name': system.get('providerName'), 'channel': system.get('channel')}))
+
+
 def reported_source_ip(raw_alert):
     """Explicit event source IP: generic, Windows logon or Sysmon Event 3."""
     data = raw_alert.get("data") if isinstance(raw_alert, dict) else None
@@ -129,8 +140,7 @@ def reported_source_ip(raw_alert):
         return None
     if str(event_id) in ("4624", "4625", "4771"):
         candidate = eventdata.get("ipAddress")
-    elif (str(event_id) == "3" and isinstance(raw_alert.get("rule"), dict)
-          and "sysmon" in (raw_alert["rule"].get("groups") or [])):
+    elif (str(event_id) == "3" and _sysmon_source(raw_alert)):
         candidate = eventdata.get("sourceIp")
     else:
         return None
@@ -163,8 +173,7 @@ def reported_destination_ip(raw_alert):
     system, fields = win.get('system'), win.get('eventdata')
     rule = raw_alert.get('rule')
     if (not isinstance(system, dict) or str(system.get('eventID')) != '3'
-            or not isinstance(fields, dict) or not isinstance(rule, dict)
-            or 'sysmon' not in (rule.get('groups') or [])):
+            or not isinstance(fields, dict) or not _sysmon_source(raw_alert)):
         return None
     try:
         return _ip(fields.get('destinationIp'), 'destination IP')

@@ -7,6 +7,7 @@ later security-category detection tied to THAT success supports T4. None confirm
 compromise. Unrecognized fallback detections remain Inconclusive.
 """
 import json
+from app.services.evidence_context import windows_path_equal, is_loopback, is_sysmon
 from itertools import combinations
 
 from app.database import get_db_connection
@@ -17,7 +18,7 @@ from app.services.investigation import (
 )
 from app.services.playbook_registry import FILE_PROCESS, REMOTE_ACCESS
 
-VERSION = 'cdss-contextual-v2'
+VERSION = 'cdss-contextual-v3'
 CRITICALITIES = ('low', 'medium', 'high', 'critical')
 MATRIX = {
     'T1': dict(zip(CRITICALITIES, ('low','low','medium','medium'))),
@@ -97,9 +98,8 @@ def _verified_events(findings, key, evidence, builder):
 
 def _file_related(left, right, evidence):
     a, b = evidence[left['alert_id']], evidence[right['alert_id']]
-    same_asset = (a.get('asset_id') is not None and a.get('asset_id') == b.get('asset_id'))
     same_agent = a.get('agent_id') and a.get('agent_id') == b.get('agent_id')
-    if not (same_asset or same_agent):
+    if not same_agent:
         return False
     for field in ('username',):
         if left.get(field) and right.get(field) and left[field] != right[field]:
@@ -108,8 +108,37 @@ def _file_related(left, right, evidence):
     right_source = b.get('source_ip') or b.get('source_fields', {}).get('source_ip')
     if left_source and right_source and left_source != right_source:
         return False
-    return bool((left.get('process_name') and left['process_name'] == right.get('process_name')) or
-                (left.get('file_path') and left['file_path'] == right.get('file_path')))
+    fa, fb = a.get('source_fields', {}), b.get('source_fields', {})
+    ga, gb = fa.get('process_guid'), fb.get('process_guid')
+    pa, pb = fa.get('process_id'), fb.get('process_id')
+    if ga and gb and ga.casefold() != gb.casefold():
+        return False
+    if pa and pb and pa != pb:
+        return False
+    if (left.get('process_name') and right.get('process_name') and
+            not windows_path_equal(left['process_name'], right['process_name'])):
+        return False
+    if ga and gb:
+        return True
+    # PID reuse cannot identify an unbounded process instance. Use the existing
+    # same-asset archive window (10 minutes on either side) as the upper bound.
+    from app.services.archive_evidence import DEFAULT_BUFFER_MINUTES
+    ta, tb = _file_event_time(a), _file_event_time(b)
+    return bool(pa and pb and pa == pb and ta and tb and
+                abs((tb-ta).total_seconds()) <= 2 * DEFAULT_BUFFER_MINUTES * 60)
+
+
+def _file_event_time(alert):
+    """Prefer Sysmon's explicit UTC occurrence time over Wazuh receipt time."""
+    fields = alert.get('source_fields', {})
+    if is_sysmon(fields) and fields.get('utc_time'):
+        from app.time_utils import parse_timestamp
+        # Sysmon names this field utcTime; do not apply naive-time handling to
+        # generic source timestamps or rewrite any retained source strings.
+        parsed = parse_timestamp(fields['utc_time'], sqlite_utc=True)
+        if parsed is not None:
+            return parsed
+    return event_time(alert.get('event_timestamp'))
 
 
 def _file_state(findings, evidence):
@@ -118,32 +147,46 @@ def _file_state(findings, evidence):
     if not primary:
         return 'Inconclusive', [], 'No traceable structured file/process observation supports this playbook.'
     linked = [(a, b) for a, b in combinations(primary, 2)
-              if a['kind'] != b['kind'] and _file_related(a, b, evidence)]
+              if a['kind'] != b['kind'] and _file_related(a, b, evidence)
+              and _file_ordered(a, b, evidence)]
     if not linked:
         noun = 'observation' if len(primary) == 1 else 'observations'
         verb = 'is' if len(primary) == 1 else 'are'
         return 'T1', [primary[0]['alert_id']], (
             f'{len(primary)} structured file/process {noun} {verb} traceable, '
             'but no related file-and-process corroboration is available.')
+    def progression(pair):
+        file_item, process_item = pair
+        core_time = _file_event_time(evidence[file_item['alert_id']])
+        candidates = [item for item in events if item['kind'] in ('network', 'integrity')
+                and core_time is not None
+                and _file_event_time(evidence[item['alert_id']]) is not None
+                and _file_event_time(evidence[item['alert_id']]) > core_time
+                and _file_related(process_item, item, evidence)]
+        return sorted(candidates, key=lambda item: (
+            not bool(evidence[process_item['alert_id']].get('source_fields', {}).get('process_guid')
+                     and evidence[item['alert_id']].get('source_fields', {}).get('process_guid')),
+            _file_event_time(evidence[item['alert_id']]), item['alert_id']))
+
+    def shared_identity(file_item, process_item):
+        return (bool(file_item.get('username') and
+                     file_item['username'] == process_item.get('username')) or
+                bool(evidence[file_item['alert_id']].get('source_ip') and
+                     evidence[file_item['alert_id']].get('source_ip') ==
+                     evidence[process_item['alert_id']].get('source_ip')))
+
     file_item, process_item = sorted(
         ((a, b) if a['kind'] == 'file' else (b, a) for a, b in linked),
-        key=lambda pair: (not bool(pair[1].get('command_line')),
+        key=lambda pair: (not bool(pair[1].get('command_line') and shared_identity(*pair)),
+                          not bool(progression(pair)),
+                          not bool(evidence[pair[0]['alert_id']].get('source_fields', {}).get('process_guid')
+                                   and evidence[pair[1]['alert_id']].get('source_fields', {}).get('process_guid')),
+                          not any(item['alert_id'] > 0 for item in pair),
                           pair[0]['alert_id'], pair[1]['alert_id']))[0]
     decisive = {file_item['alert_id'], process_item['alert_id']}
-    shared_identity = (bool(file_item.get('username') and
-                            file_item['username'] == process_item.get('username')) or
-                       bool(evidence[file_item['alert_id']].get('source_ip') and
-                            evidence[file_item['alert_id']].get('source_ip') ==
-                            evidence[process_item['alert_id']].get('source_ip')))
-    if not process_item.get('command_line') or not shared_identity:
+    if not process_item.get('command_line') or not shared_identity(file_item, process_item):
         return 'T2', sorted(decisive), 'Related file and process observations share a reported process or artifact; execution outcome is not established.'
-    core_times = [event_time(evidence[i].get('event_timestamp')) for i in decisive]
-    core_time = max(core_times) if all(core_times) else None
-    progressed = [item for item in events if item['kind'] in ('network', 'integrity')
-                  and item['alert_id'] not in decisive
-                  and core_time is not None
-                  and (event_time(evidence[item['alert_id']].get('event_timestamp')) or core_time) > core_time
-                  and _file_related(process_item, item, evidence)]
+    progressed = progression((file_item, process_item))
     if progressed:
         later = progressed[0]
         return 'T4', sorted(decisive | {later['alert_id']}), (
@@ -152,6 +195,13 @@ def _file_state(findings, evidence):
     return 'T3', sorted(decisive), (
         'Related file creation and process observations include a reported command line; '
         'the activity requires analyst validation, not a malware verdict.')
+
+
+def _file_ordered(left, right, evidence):
+    process, file = (left, right) if left['kind'] == 'process' else (right, left)
+    start = _file_event_time(evidence[process['alert_id']])
+    end = _file_event_time(evidence[file['alert_id']])
+    return bool(start is not None and end is not None and start <= end)
 
 
 def _remote_state(findings, evidence):
@@ -178,7 +228,8 @@ def _remote_state(findings, evidence):
         cross_host = [item for item in events if item['outcome'] == 'success'
             and item['alert_id'] != success_id and item['agent_id']
             and item['agent_id'] != evidence[success_id].get('agent_id')
-            and item['source_ip'] and item['source_ip'] == success_event['source_ip']
+            and item['source_ip'] and not is_loopback(item['source_ip'])
+            and item['source_ip'] == success_event['source_ip']
             and item['username'] and item['username'] == success_event['username']
             and after is not None
             and (event_time(evidence[item['alert_id']].get('event_timestamp')) or after) > after]
@@ -262,7 +313,9 @@ def _confidence(state, decisive, evidence, findings, asset, playbook):
     if state == 'Inconclusive':
         return 'low', 'Evidence does not support a defensible activity state.'
     rows = [evidence[i] for i in decisive]
-    if playbook in (FILE_PROCESS, REMOTE_ACCESS) and findings.get('archive_coverage', {}).get('status') == 'unavailable':
+    from app.services.archive_evidence import archive_coverage
+    coverage = findings.get('archive_coverage', {})
+    if playbook in (FILE_PROCESS, REMOTE_ACCESS) and archive_coverage(coverage.get('value')) == 'unavailable':
         return 'low', 'Relevant archive coverage was unavailable; source observations still support the evidence state.'
     checks = ('successful_authentication_after_failures','post_authentication_related_detections')
     unavailable = playbook == AUTH and any(
@@ -324,9 +377,16 @@ def _load(connection, investigation):
                 raise ValueError('Evidence categories do not match the stored source')
         if 'source_fields' in alert:
             expected_fields = _summary(stored[aid])['source_fields']
-            for newly_supported in ('username', 'source_ip', 'destination_ip'):
+            for newly_supported in ('username', 'source_ip', 'destination_ip',
+                                    'provider_name', 'channel', 'utc_time',
+                                    'process_guid', 'destination_port'):
                 if newly_supported not in alert['source_fields']:
                     expected_fields.pop(newly_supported, None)
+            # Older snapshots predate the Security 4688 process-name alias.
+            # Validate their original content without enriching or rewriting it.
+            if (expected_fields.get('event_id') == '4688' and
+                    'process_name' not in alert['source_fields']):
+                expected_fields.pop('process_name', None)
             if alert['source_fields'] != expected_fields:
                 raise ValueError('Allowlisted source fields no longer match stored raw evidence')
     for finding in findings.values():
@@ -410,7 +470,7 @@ def assess_investigation(incident_id, investigation_id):
             if state == 'Inconclusive':
                 matrix_reason = 'Contextual risk could not be determined from the available investigation evidence.'
             elif asset and not protected:
-                matrix_reason = 'Contextual Risk: Unassessed. Asset is not included in contextual assessment scope.'
+                matrix_reason = 'Contextual Risk: Not calculated — Risk Assessment disabled for this asset.'
             elif criticality not in CRITICALITIES:
                 matrix_reason = 'Contextual risk is Unassessed: a mapped asset with valid administrator criticality is unavailable in the investigation snapshot.'
             else:

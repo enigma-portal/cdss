@@ -1,39 +1,9 @@
-{% extends "base.html" %}
-{% from "triage_table.html" import triage_table %}
-{% macro metric(label,value,href,help,action='View investigations →') %}
-<div class="metric-wrap"><a class="metric-link" href="{{ href }}"><article><span class="metric-label">{{ label }}</span><strong>{{ value }}</strong><small>{{ action }}</small></article></a><details class="help-tip"><summary aria-label="About {{ label }}">?</summary><span role="tooltip">{{ help }}</span></details></div>
-{% endmacro %}
+{% extends 'base.html' %}
+{% from 'triage_family_card.html' import family_card with context %}
 {% block content %}
-<div class="overview-head"><div><p class="eyebrow">ANALYST WORKSPACE</p><h1>SOC overview</h1><p>Review evidence, understand risk, and record your decision.</p></div><a class="primary-action" href="{{ url_for('dashboard.alerts') }}">Review alerts →</a></div>
-<section aria-labelledby="alert-activity-heading">
-<h2 id="alert-activity-heading">Wazuh alert activity</h2>
-<section class="posture-grid">
-{{ metric('Stored Wazuh alerts',overview.alert_activity.raw_total,url_for('dashboard.alerts'),'Individual source alerts currently stored in CDSS. These are detections, not investigation cases.','Open alerts →') }}
-{{ metric('Received in last 15 minutes',overview.alert_activity.received_recently,url_for('dashboard.alerts',sort='latest'),'Counted by CDSS ingestion time, separately from the source event timestamp.','Open latest alerts →') }}
-{{ metric('Stored alert groups',overview.alert_activity.total,url_for('dashboard.alerts'),'Uses the same grouping as Alerts, including saved case alert sets. No reviewed or unread state is inferred.','Open grouped alerts →') }}
-{{ metric('High / Critical Initial Priority',overview.alert_activity.high_priority,url_for('dashboard.alerts'),'Stored groups with High or Critical initial triage priority, including saved case groups. This is not contextual risk.','Open priority queue →') }}
-</section>
-<p class="metadata">Latest source alert: {{ overview.alert_activity.latest_event_at|source_time('No alerts stored') }} · Latest CDSS ingestion: {{ overview.alert_activity.latest_ingested_at|db_time('No alerts ingested') }}</p>
-<p class="metadata">Observed endpoints: {{ overview.asset_visibility.observed }} · Mapped: {{ overview.asset_visibility.mapped }} · Not mapped: {{ overview.asset_visibility.unmapped }} · Mapped endpoints outside assessment scope: {{ overview.asset_visibility.outside_scope }}{% if current_user.role == 'admin' %} · <a href="{{ url_for('assets.index') }}">Review asset visibility →</a>{% endif %}</p>
-<section class="panel"><div class="panel-heading"><h3>Recent grouped detections</h3><a href="{{ url_for('dashboard.alerts',sort='latest') }}">Open Alerts →</a></div>
-{% if overview.alert_activity.recent %}<div class="table-wrap"><table class="context-table"><thead><tr><th>Detection</th><th>Monitored system / asset</th><th>Initial Priority</th><th>Occurrences</th><th>Last seen</th></tr></thead><tbody>
-{% for item in overview.alert_activity.recent %}<tr><td><a href="{{ url_for('dashboard.alert_group_detail',alert_id=item.representative_alert_id) }}">{{ item.rule_description or 'Description not provided' }}</a></td><td>{{ item.reported_system }}<small>{{ item.asset_name or 'Not mapped' }}</small></td><td>{{ item.initial_priority.level or 'Not assessed' }}</td><td>{{ item.occurrences }}</td><td>{{ item.last_seen|source_time }}</td></tr>{% endfor %}
-</tbody></table></div>{% else %}<p class="empty-state">No Wazuh alerts are stored yet. Review SIEM collection settings.</p>{% endif %}
-</section></section>
-<h2>Investigation activity</h2>
-<section class="posture-grid">
-{{ metric('Active investigation cases',overview.active,url_for('dashboard.incidents',view='active'),'Open and investigating cases. Accepting a recommendation does not close a case.') }}
-{{ metric('Critical / High risk',overview.active_high,url_for('dashboard.incidents',view='active_high'),'Active cases with High or Critical CDSS contextual risk, not Wazuh detection level.') }}
-{{ metric('Further investigation required',overview.further_review,url_for('dashboard.incidents',view='further_review'),'Active cases with a current analyst decision requesting further investigation.') }}
-{{ metric('Unassessed / Inconclusive',overview.active_unassessed,url_for('dashboard.incidents',view='active_unassessed'),'Active cases without a contextual risk: no assessment, inconclusive evidence, or missing protected asset context. This does not mean low risk.') }}
-</section>
-{% if overview.unmapped %}<p class="context-notice">{{ overview.unmapped }} active cases have no configured asset. Business criticality is unavailable.{% if current_user.role == 'admin' %} <a href="{{ url_for('assets.index') }}">Review asset inventory →</a>{% else %} Ask an administrator to review asset inventory.{% endif %}</p>{% endif %}
-<section class="panel detail-card"><h2>CDSS contextual risk distribution</h2><p class="metadata">All {{ overview.total }} stored cases · latest assessment · Unassessed is not Low risk.</p>
-<div class="risk-strip">{% for risk,count in overview.risks.items() %}<a href="{{ url_for('dashboard.incidents',severity=risk) }}"><span>{{ risk|title }}</span><strong>{{ count }}</strong></a>{% endfor %}</div>
-</section>
-<section class="panel"><div class="panel-heading"><div><h2>Priority investigation queue</h2><p>{{ overview.attention }} need analyst review · highest contextual risk first, then latest activity.</p></div><a class="view" href="{{ url_for('dashboard.incidents',view='attention') }}">Open queue →</a></div>
-{{ triage_table(overview.queue) }}
-</section>
-<details class="panel detail-card"><summary>Recent case activity</summary>{% for item in overview.recent %}<p><a class="incident-link" href="{{ url_for('dashboard.incident_detail',incident_id=item.id) }}">#{{ item.id }} · {{ item.title }}</a><br><small>{{ (item.last_activity_at or item.detected_at)|source_time }} · {{ item.status|title }}</small></p>{% else %}<p>No investigation cases recorded.</p>{% endfor %}</details>
-
+<div class="overview-head"><div><p class="eyebrow">TRIAGE</p><h1>What should I investigate next?</h1></div><a href="{{ url_for('dashboard.alerts',view='needs') }}">All pending detections →</a></div>
+<section class="panel detail-card primary-panel" aria-labelledby="next-heading"><h2 id="next-heading">Investigate Next</h2>{% if triage.queue %}{{ family_card(triage.queue[0],landing=true) }}{% else %}<p>No pending detections. <a href="{{ url_for('dashboard.incidents',view='active') }}">Review active investigations</a>.</p>{% endif %}</section>
+<nav class="metric-strip" aria-label="Workload summary">{% for label,value,priority in [('Critical pending',triage.critical,'Critical'),('High pending',triage.high,'High'),('Medium pending',triage.medium,'Medium')] %}<a href="{{ url_for('dashboard.alerts',view='needs',priority=priority) }}"><strong>{{ value }}</strong> {{ label }}</a>{% endfor %}<a href="{{ url_for('dashboard.incidents',view='active') }}"><strong>{{ triage.active }}</strong> Active investigations</a></nav>
+<section class="secondary-section detection-list"><h2>Remaining Priority Queue</h2><p class="metadata">Highest initial priority first; most recent activity breaks ties.</p>{% for item in triage.queue[1:] %}{{ family_card(item,landing=true) }}{% else %}<p>No further pending detections.</p>{% endfor %}</section>
+<details class="secondary-section"><summary>Recent detection activity</summary><form method="get" class="inline-controls"><label>Recent event period <select name="period">{% for value,label in [('15m','Last 15 minutes'),('1h','Last 1 hour'),('24h','Last 24 hours')] %}<option value="{{ value }}" {% if value==triage.period %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label><button class="secondary">Apply</button></form><p>{{ triage.recent }} related detections first seen in the selected period.</p></details>
 {% endblock %}

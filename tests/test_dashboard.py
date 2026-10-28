@@ -1,6 +1,9 @@
 """Smoke test for the read-only CDSS dashboard."""
 
 import unittest
+import tempfile
+from pathlib import Path
+import app.database as database
 from werkzeug.security import generate_password_hash
 
 from run import app
@@ -9,6 +12,12 @@ from app.database import get_db_connection
 
 class DashboardTests(unittest.TestCase):
     def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.original_database = database.DATABASE
+        database.DATABASE = Path(self.directory.name) / 'dashboard.db'
+        self.addCleanup(self.directory.cleanup)
+        self.addCleanup(setattr, database, 'DATABASE', self.original_database)
+        database.initialize_database()
         self.alert_ids = []
         self.incident_ids = []
         connection = get_db_connection()
@@ -68,12 +77,12 @@ class DashboardTests(unittest.TestCase):
     def test_dashboard_loads(self):
         response = self.authenticated_client().get("/")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"SOC overview", response.data)
-        self.assertIn(b"Wazuh alert activity", response.data)
-        self.assertIn(b"Investigation activity", response.data)
-        self.assertIn(b"view=active_high", response.data)
-        self.assertIn(b"severity=critical", response.data)
-        self.assertEqual(response.data.count(b'class="help-tip'), 8)
+        self.assertIn(b"What should I investigate next?", response.data)
+        self.assertIn(b"Investigate Next", response.data)
+        self.assertIn(b"Active investigations", response.data)
+        self.assertIn(b"view=needs", response.data)
+        self.assertIn(b"priority=Critical", response.data)
+        self.assertNotIn(b"CDSS contextual risk distribution", response.data)
         incidents = self.authenticated_client().get("/incidents")
         self.assertEqual(incidents.status_code, 200)
         self.assertIn(b"Investigation cases", incidents.data)

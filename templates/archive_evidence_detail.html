@@ -30,9 +30,9 @@
     <details><summary>? What does this playbook review?</summary>
       <p>{{ run.playbook.help_text }}</p>
       <p><strong>Evidence requested:</strong></p>
-      <ul>{% for need in run.playbook.evidence_requests %}<li>{{ need.label }} <small>({{ need.source_scope }})</small></li>{% endfor %}</ul>
+      <ul>{% for need in run.playbook.evidence_requests if need.label and need.label|trim %}<li>{{ need.label }} <small>({{ need.source_scope }})</small></li>{% endfor %}</ul>
       <p><strong>Investigation questions:</strong></p>
-      <ul>{% for question in run.playbook.investigation_checks %}<li>{{ question }}</li>{% endfor %}</ul>
+      <ul>{% for question in run.playbook.investigation_checks if question and question|trim %}<li>{{ question }}</li>{% endfor %}</ul>
       <p class="metadata">These are selected evidence checks. The case page shows evaluated findings and contextual assessment. Missing telemetry remains unavailable, not “not observed.”</p>
       {% if run.playbook.source_url %}<p>Reference: <a href="{{ run.playbook.source_url }}" target="_blank" rel="noopener noreferrer">{{ run.playbook.source_title }}</a></p>{% endif %}
       {% for title, url in run.playbook.additional_references %}<p>Reference: <a href="{{ url }}" target="_blank" rel="noopener noreferrer">{{ title }}</a></p>{% endfor %}
@@ -64,12 +64,12 @@
       <strong>{{ item.event_timestamp|source_time }} · {{ item.short_summary }}</strong>
       {% if item.related_system %}<span>Related activity observed on another reported system; not a compromise finding.</span>{% endif %}
       {% if item.selected_fields.username %}<span>Account: {{ item.selected_fields.username }}</span>{% endif %}
-      {% if item.selected_fields.source_ip %}<span>Network Source IP: {{ item.selected_fields.source_ip }}</span>{% endif %}
+      {% if item.selected_fields.source_ip %}<span>Network Source IP: {{ item.selected_fields.source_ip|network_label }}</span>{% endif %}
       {% if item.selected_fields.process_name %}<span>Process: {{ item.selected_fields.process_name }}</span>{% endif %}
-      {% if item.selected_fields.destination_ip %}<span>Network Destination IP: {{ item.selected_fields.destination_ip }}</span>{% endif %}
-      <small>Wazuh Archive · {{ item.source_index }} · Document {{ item.source_document_id }} · Agent {{ item.agent_id }}</small>
+      {% if item.selected_fields.destination_ip %}<span>Network Destination IP: {{ item.selected_fields.destination_ip|network_label }}</span>{% endif %}
+      <small>Wazuh archive observation</small>
       <details><summary>Technical details</summary>
-        <dl class="source-facts">
+        <dl class="source-facts"><dt>Archive index</dt><dd>{{ item.source_index }}</dd><dt>Document ID</dt><dd>{{ item.source_document_id }}</dd><dt>Agent ID</dt><dd>{{ item.agent_id }}</dd>
           {% for name, value in item.selected_fields.items() %}<dt>{{ name|replace('_',' ')|title }}</dt><dd>{{ value }}</dd>{% endfor %}
         </dl>
       </details>

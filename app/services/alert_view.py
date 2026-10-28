@@ -4,7 +4,7 @@ Alert groups are temporary view models. They never merge source records or
 change the separate incident-correlation and risk methodologies.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from math import ceil
 import json
 
@@ -177,12 +177,7 @@ def _finalize_group(members, fingerprint):
     return group
 
 
-GROUP_SQL = """WITH RECURSIVE
-source AS (
-    SELECT al.id, cdss_event_us(al.event_timestamp) AS event_us,
-           CASE WHEN active_case.case_id IS NOT NULL
-                THEN json_array('existing_case',active_case.case_id)
-                WHEN al.agent_id IS NULL OR al.agent_id='' OR al.rule_id IS NULL
+GROUP_SOURCE_IDENTITY_SQL = """CASE WHEN al.agent_id IS NULL OR al.agent_id='' OR al.rule_id IS NULL
                      OR al.rule_id='unknown' OR cdss_event_us(al.event_timestamp) IS NULL
                 THEN json_array('singleton',al.id)
                 ELSE json_array(al.agent_id,al.rule_id,al.rule_level,al.asset_id,
@@ -211,7 +206,13 @@ source AS (
                         CASE WHEN json_valid(al.raw_alert)
                                   AND json_type(al.raw_alert,'$.process.name')='text'
                              THEN NULLIF(json_extract(al.raw_alert,'$.process.name'),'') END))
-           END AS fingerprint,
+           END"""
+
+
+_GROUP_SQL_TEMPLATE = """WITH RECURSIVE
+source AS (
+    SELECT al.id, cdss_event_us(al.event_timestamp) AS event_us,
+           {fingerprint} AS fingerprint,
            CASE WHEN ?='' THEN 1 ELSE (
                INSTR(LOWER(COALESCE(al.wazuh_alert_id,'')),LOWER(?))>0 OR
                INSTR(LOWER(COALESCE(al.rule_description,'')),LOWER(?))>0 OR
@@ -243,10 +244,22 @@ ranked AS (
 ),
 summaries AS (
     SELECT fingerprint,group_no,COUNT(*) AS occurrences,MAX(matched) AS matched,
-           MAX(event_us) AS last_us,
+           MAX(event_us) AS last_us,MIN(event_us) AS first_us,
            MAX(CASE WHEN latest_rank=1 THEN id END) AS representative_id
     FROM ranked GROUP BY fingerprint,group_no
 )"""
+
+
+def group_query_sql(*, preserve_cases=True):
+    """Shared grouping query; source identity and case freezing stay unchanged."""
+    identity = GROUP_SOURCE_IDENTITY_SQL
+    if preserve_cases:
+        identity = ("CASE WHEN active_case.case_id IS NOT NULL "
+                    "THEN json_array('existing_case',active_case.case_id) ELSE " + identity + " END")
+    return _GROUP_SQL_TEMPLATE.format(fingerprint=identity)
+
+
+GROUP_SQL = group_query_sql()
 
 
 def _group_sql_parameters(connection, window_minutes, query):
@@ -293,6 +306,20 @@ def _add_group_mitre_ids(connection, groups):
     members = [member for group in groups for member in group['members']]
     _add_mitre_ids(connection, members)
     for group in groups:
+        group['prior_matching_case_id'] = None
+        if not group['existing_case_membership'] and group['first_seen_utc']:
+            # Reuse the exact grouping fingerprint, including artifact and account.
+            # Only the view drops the existing-case partition; membership is untouched.
+            matching_sql = group_query_sql(preserve_cases=False)
+            params = _group_sql_parameters(connection, alert_group_window_minutes(), '')
+            prior = connection.execute(matching_sql + '''
+                SELECT link.case_id FROM source s
+                JOIN investigation_case_alerts link ON link.alert_id=s.id
+                WHERE s.fingerprint=? AND s.event_us<?
+                ORDER BY s.event_us DESC,s.id DESC LIMIT 1''', params + [
+                    group['fingerprint'], int(group['first_seen_utc'].timestamp()*1_000_000)]).fetchone()
+            if prior:
+                group['prior_matching_case_id'] = prior['case_id']
         group['mitre_ids'] = list(dict.fromkeys(
             technique for member in group['members']
             for technique in member['mitre_ids']
@@ -330,7 +357,8 @@ def _add_group_mitre_ids(connection, groups):
 
 GROUP_CANDIDATES_SQL = ''' ,
         mapping_flags AS (
-            SELECT r.fingerprint,r.group_no,1 AS official_mapping
+            SELECT r.fingerprint,r.group_no,1 AS official_mapping,
+                   MIN(mt.technique_id) AS official_technique_id
             FROM ranked r
             JOIN alert_mitre_techniques am ON am.alert_id=r.id AND am.mapping_source='wazuh'
             JOIN mitre_techniques mt ON mt.technique_id=am.technique_id
@@ -338,15 +366,17 @@ GROUP_CANDIDATES_SQL = ''' ,
             GROUP BY r.fingerprint,r.group_no
         ),
         candidates AS (
-            SELECT s.fingerprint,s.group_no,s.last_us,s.representative_id,s.occurrences,
-                   COALESCE(
+            SELECT s.fingerprint,s.group_no,s.last_us,s.first_us,s.representative_id,s.occurrences,
+                   mf.official_technique_id,
+                   CASE WHEN saved.incident_id IS NOT NULL THEN
                      CASE saved.initial_priority
                        WHEN 'Low' THEN 0 WHEN 'Medium' THEN 1
-                       WHEN 'High' THEN 2 WHEN 'Critical' THEN 3 END,
+                       WHEN 'High' THEN 2 WHEN 'Critical' THEN 3 END
+                     ELSE
                      cdss_priority_rank(a.rule_level,asset.criticality,
                        CASE WHEN json_extract(s.fingerprint,'$[0]')='existing_case'
                             THEN 1 ELSE s.occurrences END,
-                       COALESCE(mf.official_mapping,0))) AS sort_priority
+                       COALESCE(mf.official_mapping,0)) END AS sort_priority
             FROM summaries s
             JOIN alerts a ON a.id=s.representative_id
             LEFT JOIN assets asset ON asset.id=a.asset_id
@@ -364,7 +394,34 @@ def list_alerts(connection, args):
     sort = args.get('sort') if args.get('sort') in ('priority', 'latest') else 'priority'
     window=alert_group_window_minutes()
     parameters=_group_sql_parameters(connection,window,query)
-    counts=connection.execute(GROUP_SQL+'''
+    period = args.get('period', '')
+    start_text, end_text = args.get('from', ''), args.get('to', '')
+    start = end = None
+    error = None
+    if period in ('15m', '1h', '24h'):
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(minutes={'15m':15, '1h':60, '24h':1440}[period])
+    elif period == 'custom':
+        try:
+            def parse_bound(value):
+                parsed = datetime.fromisoformat(value)
+                return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
+            start, end = parse_bound(start_text), parse_bound(end_text)
+            if start > end:
+                raise ValueError('Reversed range')
+        except (ValueError, TypeError):
+            error = 'Enter a valid From/To range in UTC, with From before To.'
+    else:
+        period = ''
+    bounds = [int(value.timestamp()*1_000_000) if value else None for value in (start,end)]
+    # Match members by event time without changing immutable case membership.
+    sql = GROUP_SQL.replace('END AS matched',
+        'END AND (? IS NULL OR cdss_event_us(al.event_timestamp)>=?) '
+        'AND (? IS NULL OR cdss_event_us(al.event_timestamp)<=?) AS matched')
+    parameters = parameters[:5] + [bounds[0], bounds[0], bounds[1], bounds[1]] + parameters[5:]
+    if error:
+        sql = sql.replace('AS matched', 'AND 0 AS matched', 1)
+    counts=connection.execute(sql+'''
         SELECT COUNT(*) AS total,COALESCE(SUM(occurrences),0) AS raw_total
         FROM summaries WHERE matched=1''',parameters).fetchone()
     total=counts['total']
@@ -375,7 +432,7 @@ def list_alerts(connection, args):
         page = 1
     ordering = ('COALESCE(sort_priority,-1) DESC,last_us DESC,representative_id DESC'
                 if sort == 'priority' else 'last_us DESC,representative_id DESC')
-    memberships=[dict(row) for row in connection.execute(GROUP_SQL+GROUP_CANDIDATES_SQL+f''',
+    memberships=[dict(row) for row in connection.execute(sql+GROUP_CANDIDATES_SQL+f''',
         page AS (SELECT fingerprint,group_no FROM candidates
                  ORDER BY {ordering} LIMIT ? OFFSET ?)
         SELECT g.id,g.fingerprint,g.group_no FROM grouped g JOIN page p
@@ -392,6 +449,7 @@ def list_alerts(connection, args):
             group['representative_alert_id']), reverse=True)
     pagination = {
         'q': query, 'sort': sort, 'page': page, 'pages': pages, 'total': total,
+        'period': period, 'from': start_text, 'to': end_text, 'time_error': error,
         'raw_total': counts['raw_total'],
         'page_numbers': list(range(max(1, page - 2), min(pages, page + 2) + 1)),
     }

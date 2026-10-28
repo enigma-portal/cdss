@@ -315,7 +315,7 @@ class ContextualRiskTests(unittest.TestCase):
         path=f'/incidents/{incident}'
         response=client.post(path+'/investigations',data={'csrf_token':'test-token'},follow_redirects=True)
         self.assertEqual(response.status_code,200)
-        self.assertIn(b'CDSS Contextual Risk',response.data)
+        self.assertIn(b'Saved Contextual Risk',response.data)
         self.assertNotIn(b'Legacy historical data',response.data)
         self.assertIn(b'T3',response.data)
         current=current_assessment(self.db,incident)

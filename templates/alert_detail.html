@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<a class="back" href="{{ url_for('dashboard.alerts') }}">← Back to alerts</a>
+<a class="back" href="{{ url_for('dashboard.alerts') }}">← Back to detections</a>
 <section class="panel detail-card analyst-section">
   <p class="eyebrow">WAZUH ALERT {{ alert.wazuh_alert_id or ('CDSS record #' ~ alert.id) }}</p>
   <h1>Alert Summary</h1>
@@ -32,11 +32,11 @@
     </dl>{% else %}<dl class="source-facts"><dt>Asset</dt><dd>Not mapped</dd><dt>Asset criticality</dt><dd>Unavailable</dd><dt>Contextual assessment scope</dt><dd>Unavailable — administrator configuration required</dd></dl><p>Unassessed because no mapped asset/criticality/assessment scope is available.</p>{% endif %}
   </section>
 </div>
-<section class="panel detail-card analyst-section"><h2>Event Network Context</h2><dl class="summary-facts"><div><dt>Network Source IP</dt><dd>{{ alert.source_ip or 'Not present in this event evidence.' }}</dd></div><div><dt>Network Destination IP</dt><dd>{{ alert.destination_ip or 'Not present in this event evidence.' }}</dd></div><div><dt>Account</dt><dd>{{ alert.username or 'Not present in this event evidence.' }}</dd></div></dl></section>
+<section class="panel detail-card analyst-section"><h2>Event Network Context</h2><dl class="summary-facts"><div><dt>Network Source IP</dt><dd>{{ alert.source_ip|network_label or 'Not present in this event evidence.' }}</dd></div><div><dt>Network Destination IP</dt><dd>{{ alert.destination_ip|network_label or 'Not present in this event evidence.' }}</dd></div><div><dt>Account</dt><dd>{{ alert.username or 'Not present in this event evidence.' }}</dd></div></dl></section>
 <section class="panel detail-card analyst-section">
   <h2>Investigation</h2>
   <p>Current status: <strong>{{ alert.investigation_status }}</strong></p>
   {% if not alert.assessment_id %}<p>CDSS Assessment: Pending Investigation</p>{% endif %}
-  {% if alert.active_case_id %}<a class="button secondary" href="{{ url_for('dashboard.incident_detail', incident_id=alert.active_case_id) }}">Open Investigation</a>{% else %}<a class="button secondary" href="{{ url_for('dashboard.alert_group_detail', alert_id=alert.id) }}">Review Grouped Alert</a>{% endif %}
+  {% if alert.active_case_id %}<a class="button secondary" href="{{ url_for('dashboard.incident_detail', incident_id=alert.active_case_id) }}">Open Investigation</a>{% else %}<a class="button secondary" href="{{ url_for('dashboard.alert_group_detail', alert_id=alert.id) }}">Review related detection</a>{% endif %}
 </section>
 {% endblock %}

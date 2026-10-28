@@ -418,12 +418,31 @@ def incident_presentation(incident, asset, timeline, investigations, contextual,
                 if isinstance(snapshot, list) and all(isinstance(item, dict) for item in snapshot):
                     evaluated = snapshot
                 break
+    decisive_ids = set()
+    if contextual:
+        try:
+            saved_inputs = json.loads(contextual['inputs_snapshot'])
+        except (TypeError, ValueError):
+            saved_inputs = {}
+        if not isinstance(saved_inputs, dict):
+            saved_inputs = {}
+        decisive_ids = set(saved_inputs.get('decisive_evidence_ids', saved_inputs.get('decisive_alert_ids', [])))
+    decisive_evidence = [item for item in evaluated if item['id'] in decisive_ids]
     for field, label in (('source_ip', 'Network Source IP'),
                          ('destination_ip', 'Network Destination IP'), ('username', 'Reported account')):
-        values = list(dict.fromkeys(item.get(field) for item in evaluated if item.get(field)))
-        evidence.append({'status': 'observed' if values else 'unavailable',
-            'label': label + ': ' + ', '.join(values[:3]) if values else
-                     label + ' was not present in the evaluated evidence.'})
+        values = list(dict.fromkeys(item.get(field) for item in decisive_evidence if item.get(field)))
+        supporting = list(dict.fromkeys(item.get(field) for item in evaluated
+                                       if item.get(field) and item.get(field) not in values))
+        if values:
+            evidence.append({'status': 'observed', 'context_role': 'decisive',
+                             'label': label + ': ' + ', '.join(values[:3])})
+        if supporting:
+            evidence.append({'status': 'observed', 'context_role': 'supporting',
+                             'label': label + ': ' + ', '.join(supporting[:3]) +
+                                      ' (available supporting context; not decisive).'})
+        if not values and not supporting:
+            evidence.append({'status': 'unavailable', 'context_role': 'unavailable',
+                             'label': label + ' was not present in the evaluated evidence.'})
     if latest:
         if latest['playbook_key'] != 'generic_evidence_review_v1':
             for finding in latest['findings']:
@@ -434,6 +453,12 @@ def incident_presentation(incident, asset, timeline, investigations, contextual,
                 if finding['finding_status'] == 'observed' and finding['finding_key'] in (
                         'file_process_events', 'remote_access_events'):
                     specific = _observation_labels(finding)
+                    if finding['finding_key'] == 'file_process_events' and contextual:
+                        selected_finding = dict(finding)
+                        selected_finding['finding_value'] = json.dumps([
+                            item for item in json.loads(finding['finding_value'])
+                            if item.get('alert_id') in decisive_ids])
+                        specific = _observation_labels(selected_finding)
                     if specific:
                         evidence.extend({'status': 'observed', 'label': text} for text in specific)
                         continue
@@ -445,7 +470,7 @@ def incident_presentation(incident, asset, timeline, investigations, contextual,
                     flag = 'cross_truncated' if finding['finding_key']=='cross_system_coverage' else 'truncated'
                     if isinstance(coverage, dict) and coverage.get(flag):
                         name = 'Other-system' if flag=='cross_truncated' else 'Same-asset'
-                        evidence.append({'status': 'unavailable', 'label':
+                        evidence.append({'status': 'observed', 'coverage': True, 'label':
                             name + ' archive coverage is partial. Retained events were evaluated; missing activity cannot be ruled out.'})
                         continue
                 if finding['finding_key'] == 'archive_coverage':
@@ -455,7 +480,7 @@ def incident_presentation(incident, asset, timeline, investigations, contextual,
                         'unavailable': 'Supporting Wazuh archive logs were unavailable for this investigation window.',
                     }.get(finding['finding_status'])
                     if label:
-                        evidence.append({'status': finding['finding_status'], 'label': label})
+                        evidence.append({'status': finding['finding_status'], 'coverage': True, 'label': label})
                     continue
                 if finding['finding_key'] in ('authentication_failures','successful_authentication'):
                     try:
@@ -480,7 +505,9 @@ def incident_presentation(incident, asset, timeline, investigations, contextual,
                             continue
                 label = FINDING_LABELS.get(finding['finding_key'])
                 if label:
-                    evidence.append({'status': finding['finding_status'], 'label': label})
+                    evidence.append({'status': finding['finding_status'],
+                                     'coverage': finding['finding_key'] == 'cross_system_coverage',
+                                     'label': label})
 
     why = None
     evidence_reason = None
@@ -498,7 +525,7 @@ def incident_presentation(incident, asset, timeline, investigations, contextual,
         if risk and criticality:
             why += f' With {criticality} asset criticality in that assessment, CDSS assigned {risk} contextual risk.'
         elif (saved_asset := _assessment_asset(contextual)) and not saved_asset.get('is_protected'):
-            why += ' Contextual Risk: Unassessed. Asset is not included in contextual assessment scope.'
+            why += ' Contextual Risk: Not calculated — Risk Assessment disabled for this asset.'
         elif criticality is None:
             why += ' Unassessed because no mapped asset/criticality/assessment scope is available in the saved assessment.'
         else:
@@ -523,6 +550,11 @@ def incident_presentation(incident, asset, timeline, investigations, contextual,
                                        ('not_observed_findings', not_observed_findings)):
                 keys = inputs.get(source_key)
                 if isinstance(keys, list):
+                    if source_key == 'unavailable_findings' and latest:
+                        from app.services.archive_evidence import archive_coverage
+                        coverage_finding=next((f for f in latest['findings'] if f['finding_key']=='archive_coverage'),None)
+                        if coverage_finding and archive_coverage(json.loads(coverage_finding['finding_value'])) != 'unavailable':
+                            keys=[key for key in keys if key != 'archive_coverage']
                     target.extend(FINDING_LABELS[key] for key in keys if key in FINDING_LABELS)
     return {
         'summary': summary,
@@ -595,7 +627,7 @@ def recommendation_presentation(recommendation, asset, timeline, assessment, inv
                 evidence_label += ' · source '+source['source_ip']
             if source.get('username'):
                 evidence_label += ' · account '+source['username']
-    if recommendation['methodology_version'] == 'cdss-guidance-v2':
+    if recommendation['methodology_version'] in ('cdss-guidance-v2', 'cdss-guidance-v3'):
         rationale = recommendation['rationale']
         if (recommendation['rule_key'] == 'review_file_origin' and
                 rationale == 'One structured file/process observation is recorded.'):
@@ -606,6 +638,9 @@ def recommendation_presentation(recommendation, asset, timeline, assessment, inv
                 rationale = (f'{count} structured file/process {noun} {verb} recorded '
                              'without related file-and-process corroboration.')
         action = recommendation['action_text']
+        if recommendation['rule_key'] == 'obtain_context' and 'contextual assessment scope' in action:
+            action = 'Obtain missing or contradictory evidence, then re-run investigation and assessment.'
+            rationale = 'The saved investigation does not establish a defensible contextual assessment.'
         if artifact and recommendation['rule_key'] in ('review_file_origin', 'review_lineage'):
             action = (f'Review the origin and execution context of {artifact}; '
                       'verify its parent process, command line and expected use before responding.')
@@ -628,10 +663,6 @@ def recommendation_presentation(recommendation, asset, timeline, assessment, inv
         if asset is None:
             action = 'Identify the affected asset and obtain missing evidence, then re-run investigation and assessment.'
             why = 'No configured asset is linked, so business criticality is missing from this assessment.'
-        elif not asset['is_protected']:
-            action = ('Confirm whether this asset should be included in CDSS protected scope. '
-                      'If its configuration changes, re-run investigation and reassess.')
-            why = 'The mapped asset is currently outside CDSS protected scope, so its criticality cannot determine contextual risk.'
         elif assessment and not assessment['asset_criticality_snapshot']:
             action = 'Confirm current asset context and obtain missing evidence, then re-run investigation and assessment.'
             why = 'The saved investigation lacks the protected-asset context now available in inventory.'

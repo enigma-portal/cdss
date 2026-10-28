@@ -1,0 +1,17 @@
+{% macro family_card(item, child=false, landing=false) %}
+<article class="triage-family">
+  <p><strong class="priority-badge priority-{{ (item.initial_priority.level or 'none')|lower }}">{{ (item.initial_priority.level or 'Not Assessed')|upper }}</strong> <small>Initial Alert Priority</small></p>
+  <h3>{{ item.rule_description or 'Description not provided' }}</h3>
+  <p><strong>{{ item.asset_name or item.reported_system }}</strong>{% if item.asset_name and item.asset_name != item.reported_system %} · {{ item.reported_system }}{% endif %} · {{ item.occurrences }} occurrence{{ 's' if item.occurrences != 1 }}{% if item.child_count > 1 and not landing %} · {{ item.child_count }} distinct artifacts{% endif %}</p>
+  <p class="metadata">Last activity {{ item.last_seen|source_time }} · {{ 'Investigation opened' if item.case_id else 'Needs Investigation' }}</p>
+  <p class="priority-reason">{{ item.priority_reason }}</p>
+  {% if child and item.artifact %}<p>Artifact: {{ item.artifact }}</p>{% endif %}
+  {% if item.prior_case and not item.case_id %}<p class="context-notice">New activity after <a href="{{ url_for('dashboard.incident_detail',incident_id=item.prior_case.id) }}">Case #{{ item.prior_case.id }}</a>. The earlier investigation is preserved.</p>{% endif %}
+  {% if item.child_count > 1 %}<p class="investigation-scope"><strong>Investigation scope:</strong> {{ item.group_occurrences }} of {{ item.occurrences }} occurrences in the highest-priority selection. Other related detections remain pending.</p>{% endif %}
+  <div class="triage-actions">
+    {% if item.case_id %}<a class="primary-action" href="{{ url_for('dashboard.incident_detail',incident_id=item.case_id) }}">Open investigation</a>{% else %}<form method="post" action="{{ url_for('dashboard.investigate_group',alert_id=item.representative_alert_id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="primary-action" type="submit">{{ 'Investigate New Activity' if item.prior_case else 'Investigate' }}</button></form>{% endif %}
+    <a href="{{ url_for('dashboard.alert_family' if not child and item.child_count > 1 else 'dashboard.alert_group_detail',alert_id=item.representative_alert_id) }}">{{ 'Compare related detections' if not child and item.child_count > 1 else 'Review detection' }} →</a>
+  </div>
+  {% if not landing %}<details><summary>Priority and source details</summary><p>{{ item.initial_priority.rationale }}</p><p>First seen {{ item.first_seen|source_time }} · Wazuh Detection Level: {{ item.rule_level }}. Source severity is separate from initial priority.</p><p>Agent Name: {{ item.agent_name or 'Not provided' }} · Agent ID: {{ item.agent_id or 'Not provided' }} · Monitored Endpoint IP: {{ item.agent_ip or 'Not provided' }}</p><p>Configured CDSS Asset: {{ item.asset_name or 'Not mapped' }}</p>{% if item.case_id %}<p>Case state: {{ item.investigation_status }}</p>{% else %}<p>CDSS Assessment: Pending Investigation</p>{% endif %}{% if item.mitre_ids %}<p>ATT&amp;CK context: {{ item.mitre_ids|join(', ') }}</p>{% endif %}</details>{% endif %}
+</article>
+{% endmacro %}

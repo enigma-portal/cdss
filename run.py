@@ -20,6 +20,8 @@ from app.time_utils import register_timestamp_filters
 
 app = Flask(__name__)
 register_timestamp_filters(app)
+from app.services.evidence_context import network_label
+app.jinja_env.filters['network_label'] = network_label
 app.config["PROJECT_TITLE"] = PROJECT_TITLE
 app.config["APP_BUILD"] = "2026.08.24-engine2"
 app.config["SIEM_REALTIME_ENABLED"] = (

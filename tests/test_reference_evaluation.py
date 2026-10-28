@@ -3,6 +3,8 @@ import copy
 from contextlib import closing
 import json
 import sqlite3
+import tempfile
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
@@ -47,8 +49,15 @@ class ReferenceEvaluationTests(unittest.TestCase):
         self.assertIsNone(evaluation.summarize([])['agreement_percentage'])
 
     def test_real_pipeline_repeatability_integrity_and_explainability(self):
-        # Byte-level protection: evaluation must not write into the user's DB.
+        # Protect an isolated DB byte-for-byte. A running collector can mutate
+        # the user's DB independently of this offline evaluation.
         import app.database as database
+        directory=tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        database_patch=patch.object(database,'DATABASE',Path(directory.name)/'protected.db')
+        database_patch.start()
+        self.addCleanup(database_patch.stop)
+        database.initialize_database()
         before=database.DATABASE.read_bytes()
         labels=evaluation.DATASET.read_bytes()
         methods=evaluation.methodology_digest()

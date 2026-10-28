@@ -9,7 +9,7 @@
 .advanced-filters .filters { padding:1rem 0; border:0; }
 .contextual-filters select, .contextual-filters input { width: 100%; min-width: 0; box-sizing: border-box; }
 .context-table { min-width: 0; width: 100%; table-layout: fixed; }
-.context-table td { vertical-align: top; max-width: 270px; overflow-wrap: anywhere; }
+.context-table td { vertical-align: top; max-width: 270px; }
 .context-table small { display: block; margin-top: .3rem; color: var(--muted); }
 .alerts-table { table-layout:auto; }
 .alerts-table th:first-child { width:17%; }
@@ -33,7 +33,6 @@
 .context-table th, .context-table td { white-space:normal; overflow-wrap:anywhere; padding:1rem .8rem; }
 .context-table .badge { white-space:normal; }
 .detail-card details { margin-top:.8rem; }
-.detail-card summary { cursor:pointer; color:var(--orange); }
 .detail-card form { margin:1rem 0; }
 .detail-head .decision-badges { min-width:0; max-width:24rem; white-space:normal; }
 .detail-head .decision-badges > small, .detail-head .decision-badges > span:last-child { display:block; margin:.35rem 0; }
@@ -56,3 +55,45 @@
  .detail-head { display:block; }
  .detail-head .decision-badges { align-items:flex-start; margin-top:1rem; }
 }
+/* Detection-family presentation keeps detail behind analyst drill-down. */
+.triage-family { padding: 1.2rem 0; }
+.detection-list .triage-family + .triage-family { border-top: 1px solid var(--border); }
+.priority-badge { display: inline-block; padding: .35rem .7rem; border: 2px solid currentColor; border-radius: .4rem; letter-spacing: .04em; }
+.priority-critical { color: #8f1430; background: #ffe1e7; }
+.priority-high { color: #873b00; background: #ffe6ce; }
+.priority-medium { color: #635000; background: #fff1bd; }
+.priority-low { color: #105546; background: #d2f4e9; }
+
+/* Shared hierarchy for the analyst workflow; existing administrative styles remain scoped. */
+.primary-panel { border-inline-start: 4px solid var(--orange); padding: 1.5rem; }
+.primary-panel .triage-family { padding-bottom: 0; }
+.primary-panel .triage-family h3 { font-size: 1.45rem; border: 0; padding: 0; }
+.secondary-section { margin: 1.5rem 0; padding: 1rem 0; border-top: 1px solid var(--border); }
+.secondary-section > h2 { margin-bottom: .8rem; }
+.detail-subsection { margin: 1.25rem 0; }
+.primary-action { display: inline-flex; align-items: center; justify-content: center; border: 0; font: inherit; font-weight: 800; cursor: pointer; }
+.primary-action:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+.metric-strip { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; padding: .8rem 0; }
+.metric-strip a { color: var(--muted); text-decoration: none; }
+.metric-strip strong { color: var(--text); margin-right: .25rem; }
+.metric-strip a:hover, .metric-strip a:focus-visible { color: var(--orange); }
+.priority-reason { margin: .5rem 0; }
+.investigation-scope { color: var(--muted); max-width: 60rem; }
+.triage-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem 1rem; }
+.triage-actions form { margin: .5rem 0; }
+.triage-family > h3 { font-size: 1.15rem; border: 0; padding: 0; }
+.quick-views { display: flex; flex-wrap: wrap; gap: .5rem 1rem; margin: 1rem 0; }
+.quick-views a { color: var(--muted); text-decoration: none; }
+.quick-views a[aria-current], .primary-nav a[aria-current] { color: var(--orange); text-decoration: underline; text-underline-offset: .3rem; }
+.triage-filters { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); padding: 1rem 0; }
+.triage-filters > details, .filter-actions { grid-column: 1 / -1; }
+.filter-actions { display: flex; align-items: center; gap: 1rem; }
+.inline-controls { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; margin: 1rem 0; }
+.evidence-observation { padding: .7rem 0; border-bottom: 1px solid var(--border); }
+.evidence-observation h4 { margin: 0 0 .4rem; }
+.evidence-observation p { margin: .3rem 0; overflow-wrap: anywhere; }
+.administration-menu { position: relative; border: 0; padding: 0; }
+.administration-menu > summary { color: var(--muted); font-size: .85rem; padding: .5rem; }
+@media(max-width:1000px) { .topbar-inner { flex-wrap: wrap; gap: 1rem; } }
+@media(max-width:700px) { .triage-filters { grid-template-columns: repeat(2,minmax(0,1fr)); } .primary-panel { padding: 1rem; } }
+@media(max-width:450px) { .triage-filters { grid-template-columns: minmax(0,1fr); } .triage-actions .primary-action { width: 100%; } }

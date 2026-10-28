@@ -36,9 +36,9 @@ class ProductAuditTests(unittest.TestCase):
             self.db.execute("UPDATE alerts SET created_at='2000-01-01 00:00:00'")
         self.assertEqual(overview_data()['alert_activity']['received_recently'],0)
         page=self.client().get('/').get_data(as_text=True)
-        self.assertIn('Wazuh alert activity',page)
-        self.assertIn('Recent grouped detections',page)
-        self.assertIn('Investigation activity',page)
+        self.assertIn('Investigate Next',page)
+        self.assertIn('Priority Queue',page)
+        self.assertIn('Active investigations',page)
 
     def test_empty_overview_does_not_invent_activity(self):
         overview=overview_data()

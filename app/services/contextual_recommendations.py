@@ -5,13 +5,14 @@ changes incident status, or records a decision on behalf of a person.
 Legacy guidance/weights are intentionally not read or written by this module.
 """
 import json
+from app.services.evidence_context import is_loopback
 
 from app.database import get_db_connection
 from app.services.contextual_risk import current_assessment, _load, _security, _state
 from app.services.investigation import AUTH, FALLBACK
 from app.services.playbook_registry import FILE_PROCESS, REMOTE_ACCESS
 
-VERSION = 'cdss-guidance-v2'
+VERSION = 'cdss-guidance-v3'
 DECISIONS = {'accept','reject','further_investigation_required'}
 
 
@@ -37,6 +38,11 @@ def _select(connection, assessment):
     selected = []
 
     def add(key,category,text,reason,ids=()):
+        sources = [evidence[item].get('source_ip') for item in ids if item in evidence]
+        if any(is_loopback(source) for source in sources):
+            text = text.replace('remote ', 'reported ')
+            reason = reason.replace('remote ', 'reported ')
+            text += ' The recorded loopback source is local to the reporting host; validate the local process/account.'
         selected.append(dict(rule_key=key, category=category, action_text=text,
             rationale=reason, source_reference='CDSS project guidance / '+VERSION+'/'+investigation['playbook_key'],
             evidence_snapshot=json.dumps({'assessment_id':assessment['id'],
@@ -59,9 +65,6 @@ def _select(connection, assessment):
         elif not asset:
             action = 'Identify the affected asset and obtain missing source evidence, then re-run investigation and assessment.'
             why = 'No configured asset is linked to the saved investigation evidence.'
-        elif not asset.get('is_protected'):
-            action = 'Confirm whether this asset belongs in contextual assessment scope; if changed, re-run investigation and assessment.'
-            why = 'The mapped asset is outside contextual assessment scope.'
         else:
             action = 'Obtain missing or contradictory evidence, then re-run investigation and assessment.'
             why = 'The saved investigation does not establish a defensible contextual assessment.'
@@ -72,13 +75,6 @@ def _select(connection, assessment):
         add('monitor','Monitoring','Watch for additional related activity while the missing context is obtained.',
             'Current evidence does not support a specific response action.',evidence)
         return selected
-
-    if asset is None:
-        add('confirm_asset_scope','Investigation','Identify the affected asset and confirm its assessment scope.',
-            'No configured asset was present in the saved investigation context.',decisive)
-    elif not asset.get('is_protected'):
-        add('confirm_asset_scope','Investigation','Confirm whether the mapped asset should be included in contextual assessment scope.',
-            'The saved asset is outside contextual assessment scope.',decisive)
 
     if playbook in (AUTH,REMOTE_ACCESS):
         remote = playbook == REMOTE_ACCESS

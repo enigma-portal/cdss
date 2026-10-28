@@ -252,7 +252,7 @@ class ContextualRecommendationTests(unittest.TestCase):
         client=self.client()
         response=client.post(f'/incidents/{incident}/investigations',data={'csrf_token':'test-token'},follow_redirects=True)
         self.assertEqual(response.status_code,200)
-        self.assertIn(b'Recommended Actions',response.data)
+        self.assertIn(b'Recommended Follow-up',response.data)
         self.assertTrue(recommendation_history(self.db,incident))
         self.assertEqual(decision_history(self.db,incident),[])
 

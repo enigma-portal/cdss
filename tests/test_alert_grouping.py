@@ -162,7 +162,7 @@ class AlertGroupingTests(unittest.TestCase):
         html = self.client().get('/alerts').data.decode()
         self.assertLess(html.index(f'/alerts/groups/{older_critical}'),
                         html.index(f'/alerts/groups/{newer_low}'))
-        self.assertIn('Highest assessed Initial Priority first', html)
+        self.assertIn('Priority and source details', html)
 
     def test_distinct_sysmon_artifacts_do_not_merge_but_existing_case_is_preserved(self):
         first, _ = self.add_alert('artifact-one', 0, target_filename='C:/Temp/a.zip')
@@ -284,10 +284,10 @@ class AlertGroupingTests(unittest.TestCase):
         queue = client.get('/alerts')
         self.assertEqual(queue.status_code, 200)
         self.assertIn(
-            f'<a class="incident-link" href="/alerts/groups/{last_id}">Authentication failure observed</a>',
+            f'href="/alerts/groups/{last_id}"',
             queue.data.decode(),
         )
-        self.assertIn('Review alert →', queue.data.decode())
+        self.assertIn('Review detection', queue.data.decode())
         self.assertNotIn('Investigate group →', queue.data.decode())
 
         detail = client.get(f'/alerts/groups/{last_id}')

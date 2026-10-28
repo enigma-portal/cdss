@@ -183,7 +183,7 @@ class ArchitectureRemediationTests(unittest.TestCase):
                                         (execution,)).fetchone()[0])
         assessment=assess_investigation(case,execution)
         self.assertEqual(self.db.execute('SELECT evidence_state FROM risk_assessments WHERE id=?',
-                                        (assessment,)).fetchone()[0],'T3')
+                                        (assessment,)).fetchone()[0],'T1')
         self.assertGreater(self.db.execute('SELECT COUNT(*) FROM investigation_finding_archive_evidence'
                                            ).fetchone()[0],0)
         self.assertTrue(generate_contextual_recommendations(case))

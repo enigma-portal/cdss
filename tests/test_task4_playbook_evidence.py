@@ -25,7 +25,8 @@ class PlaybookEvidenceTests(unittest.TestCase):
             data['dstip'] = destination
         system = {'eventID': event_id} if event_id else {}
         eventdata = {'image': process, 'targetFilename': file_path,
-                     'commandLine': command, 'user': account}
+                     'commandLine': command, 'user': account,
+                     'processId': 'fixture-100' if process else None}
         data['win'] = {'system': system, 'eventdata': {k: v for k, v in eventdata.items() if v}}
         record = {'id': name, 'timestamp': f'2026-10-09T08:{minute:02d}:00Z',
                   'agent': {'id': agent, 'name': f'LAB-{agent}'},
@@ -48,15 +49,15 @@ class PlaybookEvidenceTests(unittest.TestCase):
         return dict(run), dict(row)
 
     def file_sequence(self, stage):
-        incident, first = self.event('file', 0,
+        incident, first = self.event('file', 2,
             ['windows', 'sysmon', 'sysmon_eid11_detections'], event_id='11',
             file_path=r'C:\Temp\sample.bin', process=r'C:\Tools\cmd.exe')
         if stage >= 2:
-            self.event('process', 1, ['windows', 'sysmon', 'sysmon_eid1_detections'],
+            self.event('process', 0, ['windows', 'sysmon', 'sysmon_eid1_detections'],
                        event_id='1', process=r'C:\Tools\cmd.exe',
                        command='cmd.exe /c whoami' if stage >= 3 else None)
         if stage >= 4:
-            self.event('network', 2, ['windows', 'sysmon', 'sysmon_eid3_detections'],
+            self.event('network', 3, ['windows', 'sysmon', 'sysmon_eid3_detections'],
                        event_id='3', process=r'C:\Tools\cmd.exe',
                        destination='198.51.100.25')
         return incident, first
@@ -85,11 +86,11 @@ class PlaybookEvidenceTests(unittest.TestCase):
                 incident, _ = self.file_sequence(stage) if stage == 1 else (incident, None)
                 if stage > 1:
                     if stage == 2:
-                        self.event('process', 1, ['windows', 'sysmon', 'sysmon_eid1_detections'],
+                        self.event('process', 0, ['windows', 'sysmon', 'sysmon_eid1_detections'],
                             event_id='1', process=r'C:\Tools\cmd.exe')
                     elif stage == 3:
                         # New process observation with a reported command, not a fabricated finding.
-                        self.event('command-process', 2,
+                        self.event('command-process', 1,
                             ['windows', 'sysmon', 'sysmon_eid1_detections'], event_id='1',
                             process=r'C:\Tools\cmd.exe', command='cmd.exe /c whoami')
                     else:
@@ -224,7 +225,7 @@ class PlaybookEvidenceTests(unittest.TestCase):
         page = self.client().get(f'/incidents/{incident}')
         self.assertEqual(page.status_code, 200)
         html = page.get_data(as_text=True)
-        self.assertIn('Evidence Strength', html)
+        self.assertIn('Evidence State', html)
         self.assertIn('What are CDSS evidence states?', html)
         self.assertIn('Why this evidence state?', html)
         self.assertIn('Supporting source alerts:', html)

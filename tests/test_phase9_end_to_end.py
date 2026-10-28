@@ -240,7 +240,7 @@ class PhaseNineEndToEndTests(unittest.TestCase):
         dashboard=overview_data()
         self.assertEqual(dashboard['total'],1)
         self.assertEqual(dashboard['risks'][expected_risk or 'unassessed'],1)
-        for text in (b'Investigation Findings',b'Recommended Actions',b'Decision History',expected_state.encode()):
+        for text in (b'Key Findings',b'Recommended Follow-up',b'Decision History',expected_state.encode()):
             self.assertIn(text,response.data)
         self.assertEqual(self.client.get('/').status_code,200)
         self.assertEqual(self.client.get('/incidents').status_code,200)
