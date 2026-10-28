@@ -156,6 +156,15 @@ The three authentication references had assessment scope disabled in their histo
 
 Transport fixtures were updated to contain the real Indexer `_index` metadata required by the new contract; cursor/order assertions were preserved. A pre-review full run failed one existing error-message assertion; the implementation retained the established HTTPS wording rather than weakening that test. Test-clock and browser-locator harness mistakes were corrected before treating their outcomes as product regressions.
 
+Regression locators (under `tests/`):
+
+- Runner guard: `test_isolated_runner.test_sqlite_uri_and_filesystem_aliases_resolve_to_protected_database`.
+- Auth/session: `test_auth_hardening.test_fresh_cookie_does_not_reset_server_login_throttle`, `test_automatic_refresh_cannot_extend_idle_session`, `test_page_refresh_is_removed_and_real_navigation_extends_session`; unrelated-source lockout protection has its own test.
+- Transport: `test_endpoint_hardening.test_environment_and_client_paths_reject_cleartext_credentials`, `test_actual_transport_blocks_forbidden_resolved_destination`, `test_dns_change_cannot_redirect_connection_after_validation`, `test_unavailable_socket_family_falls_back_without_losing_tls_hostname`.
+- Retention: `test_retention_hardening.test_preview_preserves_counts_with_a_bounded_sql_work_budget`, `test_reference_to_source_identifier_is_protected`, `test_nullable_legacy_source_id_does_not_disappear_from_preview_counts`.
+- Ingestion: `test_ingestion_hardening` contains separately named regressions for durable bad-document recovery/restart, source-ID collisions, quarantine failure/cursor preservation, immutable transport identity, changed documents, replay idempotency, incomplete identity, transaction rollback, stale partial status, non-object sources and partial searches.
+- Rendered contrast, favicon health and interaction regressions: `scripts/browser_e2e.cjs`; observed RED/GREEN logs and screenshots remain local outside Git.
+
 ## Ingestion guarantees and limits
 
 Identified invalid sources are recorded with their original JSON, connector/index/document identity and payload hash in `rejected_source_events`. If rejection storage fails, the prior cursor remains. Rejection and document replay are idempotent. Unidentifiable or incomplete API pages fail closed. Partial search results never establish a safe advancing cursor.
@@ -172,6 +181,8 @@ Source/pair login budgets survive cookie changes and worker restarts. Limits use
 - Flows: login → triage → priority reason/target; detections → filter → family → group detail; investigate → case → assessment → advisory recommendation → saved decision; admin → retention preview only; empty and invalid-filter states; browser expiry redirect.
 - The in-app browser also exercised the real signed-in UI in its narrow pane. Flask test-client HTML is not represented as browser proof.
 - Screenshots remain outside Git, alongside local verification logs. They show the disposable banner as collection disabled by design.
+
+Reproduction: run `scripts/serve_browser_fixture.py` with the worktree, absolute main-DB path and an output directory outside the repository, using the existing venv. It opens the source read-only, backs up to a disposable database, disables polling and creates a random disposable-only account. Set `CDSS_E2E_OUTPUT_DIR`, `CDSS_PLAYWRIGHT_MODULE` to the already installed Playwright module, and `CDSS_BROWSER_EXECUTABLE` to installed Edge before running `scripts/browser_e2e.cjs`. The browser harness is fixed to port 5001 to avoid submitting live decisions. The temporary credential file was removed after final QA; runtime logs/screenshots/backups were not committed. Desktop and mobile screenshots were taken at different stages of the disposable investigation, so one pending occurrence was consumed between them.
 
 ## Visualization decision
 
@@ -238,4 +249,8 @@ Visualization: no new charts; dashboard truth/interaction checks passed.
 compileall: **passed**, covering app/tests/scripts and entry points. Diff check: **passed**; Git's LF/CRLF conversion notice is informational.
 Main DB: read-only integrity `ok`; zero FK violations; zero orphans across 57 relationships; zero duplicate source IDs, case memberships, archive documents, transport documents or rejected versions in the recorded preservation check.
 Independent code review: no remaining actionable blocker; its final 433-test verification condition is satisfied.
-Hardening implementation commit / remote push: pending verification.
+Hardening implementation commit: **`28cfcd9183e54fb98a23898acf334367e46cbcbc`**, “Harden authentication, ingestion reliability, and retention previews”; 29 files, 1,027 insertions and 60 deletions. A documentation-only follow-up records these verification identifiers.
+
+Remote push: **verified** by fresh `ls-remote`; hardening remote matched the implementation SHA and remote main remained **`5623b51aff3e5873a11e53e9bce38f61e5c2044f`**. Subsequent report-only commits remain on the same branch; the current branch tip is available in Git/PR history.
+
+Draft review: **https://github.com/enigma-portal/cdss/pull/1**. No merge performed. The Code Review plugin returned head revision `28cfcd9183e54fb98a23898acf334367e46cbcbc`, with **zero checks, statuses or annotations**. This means CI is absent, not that CI passed. Independent source/evidence reviewers reported no remaining actionable blocker.
