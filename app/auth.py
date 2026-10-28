@@ -54,7 +54,8 @@ def init_auth(app):
             if (user and user["is_active"] and
                     int(session.get("auth_version", -1)) == user["auth_version"]):
                 g.user = user
-                session["last_activity"] = now
+                if request.endpoint not in ('static', 'dashboard.health'):
+                    session["last_activity"] = now
             else:
                 session.clear()
         finally:

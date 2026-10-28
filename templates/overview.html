@@ -2,6 +2,7 @@
 {% from 'triage_family_card.html' import family_card with context %}
 {% block content %}
 <div class="overview-head"><div><p class="eyebrow">TRIAGE</p><h1>What should I investigate next?</h1></div><a href="{{ url_for('dashboard.alerts',view='needs') }}">All pending detections →</a></div>
+<p class="metadata">Snapshot at page load. <a href="{{ url_for('dashboard.index',period=triage.period) }}">Refresh triage</a></p>
 <section class="panel detail-card primary-panel" aria-labelledby="next-heading"><h2 id="next-heading">Investigate Next</h2>{% if triage.queue %}{{ family_card(triage.queue[0],landing=true) }}{% else %}<p>No pending detections. <a href="{{ url_for('dashboard.incidents',view='active') }}">Review active investigations</a>.</p>{% endif %}</section>
 <nav class="metric-strip" aria-label="Workload summary">{% for label,value,priority in [('Critical pending',triage.critical,'Critical'),('High pending',triage.high,'High'),('Medium pending',triage.medium,'Medium')] %}<a href="{{ url_for('dashboard.alerts',view='needs',priority=priority) }}"><strong>{{ value }}</strong> {{ label }}</a>{% endfor %}<a href="{{ url_for('dashboard.incidents',view='active') }}"><strong>{{ triage.active }}</strong> Active investigations</a></nav>
 <section class="secondary-section detection-list"><h2>Remaining Priority Queue</h2><p class="metadata">Highest initial priority first; most recent activity breaks ties.</p>{% for item in triage.queue[1:] %}{{ family_card(item,landing=true) }}{% else %}<p>No further pending detections.</p>{% endfor %}</section>

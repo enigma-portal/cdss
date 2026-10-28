@@ -8,10 +8,23 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / 'tests')]
 import app.database as database
+
+
+def targets_database(target, protected):
+    value = str(target)
+    if value.startswith('file:'):
+        parsed = urlsplit(value)
+        value = unquote(parsed.path)
+        if parsed.netloc and parsed.netloc != 'localhost':
+            value = '//' + parsed.netloc + value
+        elif len(value) > 2 and value[0] == '/' and value[2] == ':':
+            value = value[1:]
+    return Path(value).resolve() == protected.resolve()
 
 
 with tempfile.TemporaryDirectory() as directory, patch.object(database, 'DATABASE', Path(directory) / 'outer.db'):
@@ -23,8 +36,7 @@ with tempfile.TemporaryDirectory() as directory, patch.object(database, 'DATABAS
     def connect(*args, **kwargs):
         target = str(args[0])
         main_path = ROOT / 'data' / 'cdss.db'
-        if (target.startswith(main_path.as_uri()) or
-                (not target.startswith('file:') and Path(target).resolve()==main_path.resolve())):
+        if targets_database(target, main_path):
             raise RuntimeError('Automated checks must not open the main database')
         connection = original_connect(*args, **kwargs)
         if str(args[0]) == str(database.DATABASE) and str(args[0]).endswith('outer.db'):

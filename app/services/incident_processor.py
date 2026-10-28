@@ -18,7 +18,7 @@ from app.services.mitre_mapping import (
 )
 
 
-def ingest_source_alert(raw_alert):
+def ingest_source_alert(raw_alert, connection_id=None):
     """Production collection path: normalize/store an alert, never open a case.
 
     Grouping and initial priority are read-only triage views. A human explicitly
@@ -27,11 +27,20 @@ def ingest_source_alert(raw_alert):
     fixtures, but is not called by the production poller or CLI collector.
     """
     parsed = parse_alert(raw_alert)
+    from app.services.ingestion_safety import document_identity
+    identity = document_identity(raw_alert, connection_id)
     if not parsed.wazuh_alert_id:
         raise ValueError('A Wazuh/source alert identifier is required for safe ingestion.')
     connection = get_db_connection()
     try:
         with connection:
+            connection.execute('BEGIN IMMEDIATE')
+            if identity:
+                prior = connection.execute('''SELECT a.raw_alert FROM alert_source_documents d
+                    JOIN alerts a ON a.id=d.alert_id
+                    WHERE d.connection_id=? AND d.source_index=? AND d.source_document_id=?''', identity).fetchone()
+                if prior and json.loads(prior['raw_alert']) != json.loads(parsed.raw_alert):
+                    raise ValueError('Source document changed; original alert preserved.')
             for technique_id in parsed.mitre_ids:
                 ensure_context_technique(connection, technique_id)
             record = parsed.as_database_record()
@@ -43,11 +52,23 @@ def ingest_source_alert(raw_alert):
                 tuple(record.values()))
             alert_id = cursor.lastrowid if cursor.rowcount else None
             if alert_id is None:
-                existing = connection.execute('SELECT id FROM alerts WHERE wazuh_alert_id=?',
+                existing = connection.execute('SELECT id,raw_alert FROM alerts WHERE wazuh_alert_id=?',
                                               (parsed.wazuh_alert_id,)).fetchone()
                 if existing is None:
                     raise RuntimeError('Alert storage failed without a duplicate source identifier.')
                 alert_id = existing['id']
+                if json.loads(existing['raw_alert']) != json.loads(parsed.raw_alert):
+                    raise ValueError('Source identifier collision; original alert preserved.')
+                if identity:
+                    different = connection.execute('''SELECT 1 FROM alert_source_documents
+                        WHERE alert_id=? AND (connection_id<>? OR source_index<>? OR source_document_id<>?)''',
+                        (alert_id,*identity)).fetchone()
+                    if different:
+                        raise ValueError('Source namespace collision; original alert preserved.')
+            if identity:
+                connection.execute('''INSERT INTO alert_source_documents
+                    (connection_id,source_index,source_document_id,alert_id) VALUES(?,?,?,?)
+                    ON CONFLICT(connection_id,source_index,source_document_id) DO NOTHING''',(*identity,alert_id))
             record_alert_mappings(connection, alert_id)
             connection.execute("UPDATE alerts SET processing_status='processed' WHERE id=?", (alert_id,))
             return {'alert_id': alert_id, 'created': bool(cursor.rowcount), 'incident_id': None}

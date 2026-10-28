@@ -30,19 +30,21 @@ def protected_sql(connection):
     clauses = []
     tables = [r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")]
     for table in tables:
-        if table == 'alert_mitre_techniques':
+        if table in ('alert_mitre_techniques', 'alert_source_documents'):
             continue
         for fk in connection.execute('PRAGMA foreign_key_list(' + _quote(table) + ')'):
             if fk['table'] == 'alerts':
-                clauses.append(f'EXISTS(SELECT 1 FROM {_quote(table)} ref WHERE ref.{_quote(fk["from"])}=al.id)')
+                target = _quote(fk['to'] or 'id')
+                source = _quote(fk['from'])
+                clauses.append(f'al.{target} IN (SELECT {source} FROM {_quote(table)} WHERE {source} IS NOT NULL)')
     if 'incident_mitre_sources' in tables:
-        clauses.append('EXISTS(SELECT 1 FROM incident_mitre_sources ref WHERE ref.source_alert_id=al.id)')
+        clauses.append('al.id IN (SELECT source_alert_id FROM incident_mitre_sources WHERE source_alert_id IS NOT NULL)')
     # Archive copies may refer to source Wazuh IDs rather than CDSS foreign keys.
     if 'investigation_archive_evidence' in tables:
         columns = {r['name'] for r in connection.execute('PRAGMA table_info(investigation_archive_evidence)')}
         if 'selected_fields_json' in columns:
-            clauses.append("EXISTS(SELECT 1 FROM investigation_archive_evidence ref WHERE json_valid(ref.selected_fields_json) AND CAST(json_extract(ref.selected_fields_json,'$.source_alert_id') AS TEXT)=al.wazuh_alert_id)")
-    return '(' + ' OR '.join(clauses or ['0']) + ')'
+            clauses.append("al.wazuh_alert_id IN (SELECT CAST(json_extract(selected_fields_json,'$.source_alert_id') AS TEXT) FROM investigation_archive_evidence WHERE json_valid(selected_fields_json) AND json_extract(selected_fields_json,'$.source_alert_id') IS NOT NULL)")
+    return 'COALESCE((' + ' OR '.join(clauses or ['0']) + '),0)'
 
 
 def selection(values):

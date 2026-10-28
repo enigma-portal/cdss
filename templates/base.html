@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  {% if current_user and request.endpoint == 'dashboard.index' and siem_collection_status.enabled_count %}<meta http-equiv="refresh" content="30">{% endif %}
   <title>{{ config.PROJECT_TITLE }}</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
   <meta name="cdss-build" content="{{ config.APP_BUILD }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/detail.css') }}">

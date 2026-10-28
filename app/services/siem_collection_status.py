@@ -12,11 +12,12 @@ from app.time_utils import parse_timestamp
 LABELS = {
     'disabled': 'SIEM alert collection disabled',
     'active': 'SIEM alert collection active',
+    'partial': 'SIEM collection partial — source documents need review',
     'failed': 'SIEM unavailable — alert collection interrupted',
     'unknown': 'SIEM alert collection status unknown',
     'stale': 'SIEM alert collection stale',
 }
-PRECEDENCE = ('failed', 'unknown', 'stale', 'active')
+PRECEDENCE = ('failed', 'partial', 'unknown', 'stale', 'active')
 
 
 @dataclass(frozen=True)
@@ -52,7 +53,7 @@ def connector_collection_status(row, poll_interval_seconds=30, *, now=None,
         state = 'disabled'
     elif row['status'] == 'error':
         state = 'failed'
-    elif row['status'] != 'connected':
+    elif row['status'] not in ('connected','partial'):
         state = 'unknown'
     else:
         current = parse_timestamp(now) if now is not None else datetime.now(timezone.utc)
@@ -63,7 +64,7 @@ def connector_collection_status(row, poll_interval_seconds=30, *, now=None,
         elif age > max(60, 3 * _interval_seconds(poll_interval_seconds)):
             state = 'stale'
         else:
-            state = 'active'
+            state = 'partial' if row['status']=='partial' else 'active'
     return CollectionStatus(state, LABELS[state], _utc_timestamp(row['last_success_at']), int(enabled))
 
 
