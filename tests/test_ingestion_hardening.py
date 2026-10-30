@@ -136,7 +136,7 @@ class IngestionHardeningTests(unittest.TestCase):
 
     def test_partial_collection_requires_fresh_successful_contact(self):
         from app.services.siem_collection_status import connector_collection_status
-        row={'is_enabled':1,'status':'partial','last_success_at':'2026-10-28T09:00:00Z'}
+        row={'is_enabled':1,'poll_status':'partial','last_poll_success_at':'2026-10-28T09:00:00Z'}
         self.assertEqual(connector_collection_status(row,now='2026-10-28T09:00:10Z').state,'partial')
         self.assertEqual(connector_collection_status(row,now='2026-10-28T10:00:00Z').state,'stale')
 

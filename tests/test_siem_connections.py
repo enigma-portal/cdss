@@ -63,7 +63,7 @@ class SiemConnectionTests(unittest.TestCase):
                 connection = get_db_connection()
                 with connection:
                     connection.execute(
-                        f"UPDATE siem_connections SET is_enabled=?, status=?, last_success_at={success_sql}",
+                        f"UPDATE siem_connections SET is_enabled=?, poll_status=?, last_poll_success_at={success_sql}",
                         (enabled, status),
                     )
                 connection.close()

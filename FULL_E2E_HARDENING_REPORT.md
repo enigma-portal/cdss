@@ -2,6 +2,8 @@
 
 Audit date: 28 October 2026, Asia/Karachi. Database/source event times below are UTC unless stated otherwise.
 
+**30 October 2026 update:** The PR #1 remediation section at the end supersedes the earlier collection-health/source-identity behavior and the 433-test verification record. The October 28 audit remains historical evidence. The remediation was verified on disposable databases; the running live app and its database were not upgraded or restarted for this follow-up.
+
 ## Verdict
 
 **READY WITH LIMITATIONS for reviewed local use.** This is not production certification, independent detection-effectiveness validation, or a claim of enterprise scalability. Final verification and remote branch identifiers are recorded at the end of this report.
@@ -240,7 +242,7 @@ Query plans identified repeated unindexed correlated scans across reference/arch
 11. Historical assessments can reflect earlier asset scope/criticality. Their preserved snapshots and current-setting notices must be considered by analysts.
 12. Normal startup's existing legacy seed/template refresh remains an operational side effect, disclosed above.
 
-## Final verification record
+## October 28 verification record (historical)
 
 Final full regression: **433 tests, zero failures/errors, 308.802 seconds**, freshly run after the final source changes. Isolated wrapper confirmed protected outer database unchanged and zero write statements.
 Focused E2E: **13 tests, zero failures/errors**, including offline T1–T4/Inconclusive pipeline/forms; protected outer database unchanged, zero writes. These fixtures do not prove live Wazuh detection effectiveness.
@@ -254,3 +256,129 @@ Hardening implementation commit: **`28cfcd9183e54fb98a23898acf334367e46cbcbc`**,
 Remote push: **verified** by fresh `ls-remote`; hardening remote matched the implementation SHA and remote main remained **`5623b51aff3e5873a11e53e9bce38f61e5c2044f`**. Subsequent report-only commits remain on the same branch; the current branch tip is available in Git/PR history.
 
 Draft review: **https://github.com/enigma-portal/cdss/pull/1**. No merge performed. The Code Review plugin returned head revision `28cfcd9183e54fb98a23898acf334367e46cbcbc`, with **zero checks, statuses or annotations**. This means CI is absent, not that CI passed. Independent source/evidence reviewers reported no remaining actionable blocker.
+## PR #1 pre-merge remediation — 30 October 2026
+
+### Scope and verdict
+
+**READY WITH LIMITATIONS for review; NOT MERGED.** Only `e2e-hardening-2026-10-28` was changed. Starting local/remote branch SHA: `8a9a259ab0d5f34f49097748f33f0da46b7a6d30`. Remote main remained the checkpoint `5623b51aff3e5873a11e53e9bce38f61e5c2044f`. No merge, reset, force push, dependency installation, live connector edit, cursor reset, purge, or historical assessment rewrite was performed.
+
+Systematic debugging reproduced both requested P1 defects through real Flask administration routes, database migrations, the poller and Indexer parsing, mocking only external transport/credentials. Strict TDD established regression failures before corrections. Independent review identified additional cases within the same source-identity contract; these also followed RED → minimal fix → GREEN. Verification-before-completion was applied to the final source state.
+
+### P1-1: connectivity versus collection health
+
+**Root cause:** Manual connection tests and polling both wrote `status` and `last_success_at`. The collection-status service interpreted those shared contact fields as proof of collection. A manual success could therefore falsely show active collection, overwrite partial status, or conceal a poll failure.
+
+**Fix:** An additive, repeatable migration adds `poll_status`, `last_poll_success_at` and `last_poll_error`. Only an actual successful collection cycle establishes poll proof, including a valid empty response. Manual testing retains its latency, cluster-health, contact timestamp and connection result without modifying poll proof or cursors. Connector edits invalidate previous poll proof.
+
+The banner and connector card use the explicit poll fields. Pending durable rejections remain visible independently of manual connectivity status, including after recreation of a known logical source. Failed/stale/unknown states retain a source-review warning when applicable. The admin page separately labels “Last successful collection cycle” and “Last successful SIEM contact.” Legacy contact timestamps are deliberately not backfilled as proven polls.
+
+### P1-2: stable logical source identity
+
+**Root cause:** The existing observation key `(connection_id, source_index, source_document_id)` treated a recreated connector's new database ID as a different source, even when only credentials changed. Conversely, changing an endpoint under an existing ID could incorrectly retain an old identity.
+
+**Stable source identity semantics:**
+
+- Persist `source_namespace` as versioned JSON: `["endpoint-v1", connector_type, canonical_https_host, effective_port]`.
+- Normalize host case, trailing DNS dot, IDNA spelling and IPv6 textual form. Use the shared HTTPS endpoint validator. Identity calculation never resolves DNS.
+- Connector ID, friendly name, credentials, TLS verification setting and query/index pattern do not define logical source identity. The actual returned index and document ID independently scope a source document.
+- Persist the original observation's namespace. Exact matching payload, Wazuh ID, namespace, actual index and document ID can be observed again through a recreated connector without duplicating or rewriting the alert. A new observation records the new connector ID while preserving the old observation.
+- Compare the logical document before insertion, so changing both the payload and Wazuh ID after recreation cannot manufacture a second version of the same immutable document.
+- Different origin, conflicting payload, reused source identity, missing historical provenance or unknown legacy namespace fails closed or is durably quarantined. Current editable connector settings are never used to invent historical origin.
+- Capture connector configuration before fetch and recheck it inside write transactions for ingestion, quarantine and cycle completion. An administrator edit during fetch cannot attribute old-source data, cursor progress or poll proof to the new configuration.
+
+**Limits:** Different DNS aliases, hostname/IP forms or ports are different identities even if they happen to reach the same cluster. Replacing a cluster behind an unchanged endpoint cannot be detected from endpoint identity alone; a reused immutable document that differs is still rejected, but an exact matching document is indistinguishable. No remote cluster UUID is invented or claimed. Legacy rows with NULL/absent provenance require explicit operator review on replay; no historical backfill, repair or rewrite was performed.
+
+### P2: bounded quarantine reason codes
+
+**Implemented.** New durable rejections use the existing `reason` field with a fixed whitelist: `malformed_event`, `changed_document`, `source_identity_conflict`, `incomplete_identity`. Arbitrary exception strings are never stored there; historical reasons are preserved. Specific malformed/changed/conflicting cases are covered by integration assertions. An unidentifiable API page continues to fail closed rather than pretending a durable source identity exists. No quarantine-management UI was added.
+
+A reused volatile quarantine key whose stored namespace differs cannot be silently ignored: it retains the previous cursor and reports collection failure. Original rejected JSON, hash and origin remain preserved.
+
+### TDD evidence and regression quality
+
+Evidence logs and screenshots are local artifacts outside Git in the parent of the worktree. Assertions were not removed to obtain green. Existing status fixtures were updated to explicitly provide poll proof under the new contract; their freshness, disabled/error and rendering expectations remain.
+
+| Regression | Observed RED | Minimal correction | GREEN |
+|---|---|---|---|
+| Manual success with no poll; durable review warning; manual success after poll failure | Initial integration run: 5 new failures, zero errors, including both identity failures below | Separate persisted poll proof and independent rejection visibility | Status cases passed; final 17-test integration suite passed |
+| Recreate same endpoint/new ID; change endpoint under same ID | Exact replay falsely quarantined; changed endpoint accepted as original | Persist and compare stable namespace, preserve individual observations | Replay creates no duplicate or rewrite; new documents ingest; genuine conflicts quarantine |
+| Edit configuration after successful poll | Old collection proof still showed active | Invalidate proof on edit | Edit regression passed |
+| Generic rejection reason; reused quarantine key across endpoints | Reason assertion and cursor-retention assertion failed | Whitelisted reason codes and namespace check before idempotent rejection insert | Both passed |
+| Changed logical document plus new Wazuh ID after recreation | Second alert incorrectly inserted | Namespace/index/document lookup before insertion | One immutable alert retained; changed version quarantined |
+| Configuration edit during fetch, valid and malformed documents | Old-source data/proof could be attributed to changed configuration | Snapshot checks inside write transactions and before completion | No false provenance, rejection, cursor or proof minted |
+| Existing alert without historical provenance | Replay invented an origin | Require known compatible provenance before accepting duplicate ID | Historical alert retained and replay quarantined |
+| Logical-document lookup at 20,000 provenance observations | New alert failed to complete within a deterministic 20,000 SQLite-operation budget | Composite index on `(source_namespace,source_index,source_document_id)` | Same test passed without weakening the work budget |
+
+Local RED records: `pr1-integration-red.log`, `pr1-edit-red.log`, `pr1-reasons-red.log`, `pr1-review-red.log`, `pr1-query-red.log`. Corresponding GREEN records include `pr1-integration-green.log`, `pr1-edit-green.log`, `pr1-reasons-green.log`, `pr1-review-green.log`, `pr1-query-green.log`. The first discovery harness imported a TestCase directly and also ran nine existing auth tests; that import was corrected to a module reference. No harness error was represented as a product defect.
+
+The new `tests/test_pr1_integration.py` contains 17 tests covering real administration/poll persistence interactions, empty polls, failures, quarantine visibility, recreation, immutable payload/history, endpoint changes, migration idempotency, unknown/absent legacy provenance, canonical origin spelling, configuration races and bounded query work. Schema/provenance fixture checks include FK validation. The SQL budget measures work at a defined history volume; it is not an ingestion-throughput or enterprise-scale claim.
+
+### Rendered browser QA
+
+**Flow:** normal login → SIEM connections → Test connection → Enable collection → actual disposable poll outcomes → banner/card state and separate connectivity information.
+
+**Environment:** `http://127.0.0.1:5001/admin/siem-connections`; installed Edge through Playwright; desktop 1440×1000 and mobile 390×844. **Browser plugin not available.** The fallback used already installed dependencies. This follow-up used a fresh disposable database and synthetic external transport, not a copy modified in place or a live SIEM request. The original app on port 5000 was not restarted.
+
+| Requested state / interaction | Rendered result | Result |
+|---|---|---|
+| Manual test succeeds, no proven poll | Collection status unknown; green cluster/contact shown separately; no proven successful poll | PASS |
+| Valid successful poll with zero alerts | Collection active; successful collection timestamp visible | PASS |
+| Old poll followed by successful manual test | Collection stale; manual success does not refresh poll proof | PASS |
+| Failed poll followed by successful manual test | Collection interrupted; poll error retained separately | PASS |
+| Durable malformed event followed by successful manual test | Collection partial / source documents need review | PASS |
+| Empty successful poll with unresolved rejection | Collection remains partial / review required | PASS |
+| Mobile 390px | No horizontal overflow; readable collection banner | PASS |
+| Keyboard | Focus advances to an actual control | PASS |
+
+| Required QA evidence | Result |
+|---|---|
+| Page identity, expected route/title, HTTP success | PASS |
+| Meaningful nonblank content | PASS |
+| No application error overlay | PASS, visually inspected |
+| Console/page errors | Zero |
+| Screenshot evidence | All five states plus persistent partial and mobile captured and inspected |
+| Actual interaction proof | Login, Test connection, Enable collection, and subsequent rendered state checks passed |
+
+Final browser run: **8 checks, zero errors**, after the final migration/index change. Screenshots remain outside Git: `pr1-test-only.png`, `pr1-poll-active.png`, `pr1-poll-stale.png`, `pr1-poll-failed.png`, `pr1-quarantine-partial.png`, `pr1-empty-poll-keeps-review.png`, `pr1-partial-mobile.png`. The active screenshot correctly shows no stored ingestion contact: an empty successful poll proves collection without inventing a new alert.
+
+Reproduction artifacts are `pr1_browser_server.py`, `pr1_browser.cjs` and `pr1-browser-results.json` outside the repository. The QA server controls only a fresh temporary DB, disables background polling and uses a disposable-only random login. Run it with the existing venv and worktree/output arguments, then run the CJS script with the installed Node runtime. QA-only control routes are not production code. The temporary credential file is removed after QA. No new charts, frontend build workflow or dashboard redesign was introduced.
+
+Remaining browser scope: this was Edge at the stated two viewports, with synthetic transport. It does not validate another browser, remote Wazuh service availability, unattended production deployment or a migrated live runtime. Installing the Browser plugin would allow future in-app browser QA; it was not installed by this task.
+
+### Fresh final verification
+
+| Check | Exact result |
+|---|---|
+| Full regression after final source/index changes | **450 tests, 0 failures, 0 errors; 327.272 seconds** |
+| Focused new PR integration suite | **17 tests, 0 failures/errors** |
+| Focused authentication (`test_auth*.py`) | **13 tests, 0 failures/errors** |
+| Focused ingestion (`test_*ingestion*.py`) | **20 tests, 0 failures/errors** |
+| Focused SIEM/status (`test_siem*.py`) | **10 tests, 0 failures/errors** |
+| Focused phase 9 E2E | **13 tests, 0 failures/errors**, offline T1–T4/Inconclusive pipeline/forms |
+| Isolated wrapper protection | Outer DB byte-for-byte unchanged, zero write statements; integrity ok, FK empty |
+| Real rendered browser | **8 checks passed, 0 console/page errors**, desktop/mobile |
+| compileall | Passed: app, tests, scripts, run.py, wsgi.py, config.py |
+| git diff --check | Passed; LF/CRLF notices informational |
+| Main DB explicit read-only integrity | `ok` |
+| Main DB FK violations | **0** |
+| Main DB orphan checks | **0 across 57 declared relationships** |
+| Main DB duplicate checks | **0** source IDs, case memberships, archive documents, transport documents, rejected versions |
+| Historical preservation | **18,530/18,530 alerts unchanged; no protected historical table prefix changed** |
+| Independent final source review | No remaining correctness/security blocker; composite index addresses review's lookup finding |
+| Visualization | No charts added; chart-specific tests not applicable |
+
+Full/focused suites used the existing `scripts/run_isolated_checks.py` wrapper so discovery and tests could not open the main database. Example full invocation: existing venv Python, `scripts/run_isolated_checks.py full ../pr1-final-full.log`; focused runs supply the discovery pattern as the fourth command argument. The final main-DB check used explicit SQLite read-only mode and a consistent read transaction, with per-table baseline hashes and FK/duplicate/orphan checks. Output: `pr1-preservation-final.json`, outside Git.
+
+Expected negative-path polling/error logs were observed during passing tests; they are not hidden production failures. Existing fresh-cookie throttling, unrelated-source lockout protection, idle timeout, HTTPS/pinned destination/DNS rebinding, partial/timed-out search, quarantine preservation/failure, retention preview, T-state and priority-boundary regressions remain included in the 450-test run.
+
+### Preservation and remaining deployment limits
+
+Main DB reset: **No**. Alerts purged: **No**. Historical assessments rewritten: **No**. Wazuh configuration changed: **No**. Attacks generated: **No**. Initial Alert Priority methodology, T1–T4 methodology, contextual-risk matrix and grouping semantics were not changed.
+
+The new additive migration was verified only on disposable databases. The live runtime continues its existing code/schema until a deliberate normal startup/deployment; after migration, collection is conservatively unknown until a successful actual poll. No migration was applied merely for testing this follow-up.
+
+Unknown historical source origin cannot be reconstructed safely; replay can require operator review. The original global unique Wazuh ID model remains, so genuine cross-source collisions still quarantine rather than silently merging or assigning invented IDs. There is still no quarantine resolution/replay console. Pending-quarantine health aggregation depends on retained quarantine history; no high-volume status-query SLA is claimed. The October 28 deployment, proxy, archive coverage, late-arrival, startup seed and scale limitations remain applicable.
+
+### Remediation Git receipt
+
+The verified implementation SHA and push verification are recorded in the following receipt after committing. A report-only receipt commit necessarily has its own SHA; the exact final branch tip is provided in the task handoff and can be resolved from `refs/heads/e2e-hardening-2026-10-28`. PR #1 remains **NOT MERGED**.

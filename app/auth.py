@@ -8,7 +8,7 @@ from functools import wraps
 from flask import abort, g, redirect, request, session, url_for
 
 from app.database import get_db_connection
-from app.services.siem_collection_status import overall_collection_status
+from app.services.siem_collection_status import overall_collection_status, collection_status_rows
 
 
 def init_auth(app):
@@ -20,9 +20,7 @@ def init_auth(app):
             settings = dict(connection.execute(
                 "SELECT setting_key, setting_value FROM system_settings"
             ).fetchall())
-            connectors = connection.execute(
-                "SELECT is_enabled, status, last_success_at FROM siem_connections"
-            ).fetchall()
+            connectors = collection_status_rows(connection)
             g.siem_collection_status = overall_collection_status(
                 connectors, settings.get('poll_interval_seconds', '30'),
                 polling_enabled=app.config.get('SIEM_REALTIME_ENABLED', True))

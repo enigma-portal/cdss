@@ -13,7 +13,8 @@ class SiemCollectionStatusTests(unittest.TestCase):
     NOW = datetime(2026, 10, 9, 12, 0, tzinfo=timezone.utc)
 
     def row(self, *, enabled=1, status='connected', success='2026-10-09 11:59:30'):
-        return {'is_enabled': enabled, 'status': status, 'last_success_at': success}
+        return {'is_enabled': enabled, 'status': status, 'last_success_at': success,
+                'poll_status':status, 'last_poll_success_at':success}
 
     def test_disabled_is_grey_even_with_old_connected_state(self):
         self.assertEqual(connector_collection_status(self.row(enabled=0), now=self.NOW).state, 'disabled')
@@ -25,7 +26,7 @@ class SiemCollectionStatusTests(unittest.TestCase):
         self.assertEqual(state.state, 'failed')
         self.assertIn('interrupted', state.label)
 
-    def test_recent_connected_contact_is_active(self):
+    def test_recent_successful_poll_is_active(self):
         self.assertEqual(connector_collection_status(self.row(), now=self.NOW).state, 'active')
 
     def test_unknown_and_stale_are_not_active(self):
