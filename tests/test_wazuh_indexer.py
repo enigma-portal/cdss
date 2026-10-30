@@ -77,7 +77,7 @@ class WazuhIndexerClientTests(unittest.TestCase):
     def test_incremental_page_uses_search_after_and_returns_cursor(self):
         response = MagicMock()
         response.read.return_value = json.dumps({"hits": {"hits": [{
-            "_id": "doc-2", "_source": {"timestamp": "2026-08-24T10:00:01Z"},
+            "_index": "wazuh-alerts-fixture", "_id": "doc-2", "_source": {"timestamp": "2026-08-24T10:00:01Z"},
             "sort": ["2026-08-24T10:00:01Z", "doc-2"],
         }]}}).encode("utf-8")
         context_manager = MagicMock()
@@ -95,7 +95,7 @@ class WazuhIndexerClientTests(unittest.TestCase):
     def test_numeric_sort_value_keeps_its_opensearch_type(self):
         response = MagicMock()
         response.read.return_value = json.dumps({"hits": {"hits": [{
-            "_id": "doc-2", "_source": {"timestamp": "2026-08-24T10:00:01Z"},
+            "_index": "wazuh-alerts-fixture", "_id": "doc-2", "_source": {"timestamp": "2026-08-24T10:00:01Z"},
             "sort": [1787565601000, "doc-2"],
         }]}}).encode("utf-8")
         context_manager = MagicMock()
@@ -112,9 +112,9 @@ class WazuhIndexerClientTests(unittest.TestCase):
     def test_first_page_bootstraps_from_latest_batch(self):
         response = MagicMock()
         response.read.return_value = json.dumps({"hits": {"hits": [
-            {"_id": "new", "_source": {"timestamp": "2026-08-24T10:00:02Z"},
+            {"_index": "wazuh-alerts-fixture", "_id": "new", "_source": {"timestamp": "2026-08-24T10:00:02Z"},
              "sort": ["2026-08-24T10:00:02Z", "new"]},
-            {"_id": "old", "_source": {"timestamp": "2026-08-24T10:00:01Z"},
+            {"_index": "wazuh-alerts-fixture", "_id": "old", "_source": {"timestamp": "2026-08-24T10:00:01Z"},
              "sort": ["2026-08-24T10:00:01Z", "old"]},
         ]}}).encode("utf-8")
         context_manager = MagicMock()
@@ -130,7 +130,7 @@ class WazuhIndexerClientTests(unittest.TestCase):
     def test_same_timestamp_documents_are_ordered_and_resumed_by_id(self):
         response = MagicMock()
         response.read.return_value = json.dumps({"hits": {"hits": [
-            {"_id": "doc-b", "_source": {"timestamp": "2026-08-24T10:00:00Z"},
+            {"_index": "wazuh-alerts-fixture", "_id": "doc-b", "_source": {"timestamp": "2026-08-24T10:00:00Z"},
              "sort": ["2026-08-24T10:00:00Z", "doc-b"]},
         ]}}).encode("utf-8")
         context_manager = MagicMock(); context_manager.__enter__.return_value = response

@@ -18,7 +18,7 @@ from app.services.mitre_mapping import (
 )
 
 
-def ingest_source_alert(raw_alert):
+def ingest_source_alert(raw_alert, connection_id=None, *, expected_connector=None):
     """Production collection path: normalize/store an alert, never open a case.
 
     Grouping and initial priority are read-only triage views. A human explicitly
@@ -27,11 +27,34 @@ def ingest_source_alert(raw_alert):
     fixtures, but is not called by the production poller or CLI collector.
     """
     parsed = parse_alert(raw_alert)
+    from app.services.ingestion_safety import document_identity, source_namespace, SourceEventError, require_connector_snapshot
+    identity = document_identity(raw_alert, connection_id)
     if not parsed.wazuh_alert_id:
         raise ValueError('A Wazuh/source alert identifier is required for safe ingestion.')
     connection = get_db_connection()
     try:
         with connection:
+            connection.execute('BEGIN IMMEDIATE')
+            require_connector_snapshot(connection, expected_connector)
+            if identity:
+                connector = connection.execute('SELECT * FROM siem_connections WHERE id=?', (connection_id,)).fetchone()
+                if connector is None:
+                    raise SourceEventError('incomplete_identity')
+                namespace = source_namespace(connector)
+                prior = connection.execute('''SELECT a.raw_alert,d.source_namespace FROM alert_source_documents d
+                    JOIN alerts a ON a.id=d.alert_id
+                    WHERE d.connection_id=? AND d.source_index=? AND d.source_document_id=?''', identity).fetchone()
+                if prior:
+                    if prior['source_namespace'] != namespace:
+                        raise SourceEventError('source_identity_conflict')
+                    if json.loads(prior['raw_alert']) != json.loads(parsed.raw_alert):
+                        raise SourceEventError('changed_document')
+                logical_prior = connection.execute('''SELECT a.raw_alert FROM alert_source_documents d
+                    JOIN alerts a ON a.id=d.alert_id
+                    WHERE d.source_namespace=? AND d.source_index=? AND d.source_document_id=? LIMIT 1''',
+                    (namespace,identity[1],identity[2])).fetchone()
+                if logical_prior and json.loads(logical_prior['raw_alert']) != json.loads(parsed.raw_alert):
+                    raise SourceEventError('changed_document')
             for technique_id in parsed.mitre_ids:
                 ensure_context_technique(connection, technique_id)
             record = parsed.as_database_record()
@@ -43,11 +66,25 @@ def ingest_source_alert(raw_alert):
                 tuple(record.values()))
             alert_id = cursor.lastrowid if cursor.rowcount else None
             if alert_id is None:
-                existing = connection.execute('SELECT id FROM alerts WHERE wazuh_alert_id=?',
+                existing = connection.execute('SELECT id,raw_alert FROM alerts WHERE wazuh_alert_id=?',
                                               (parsed.wazuh_alert_id,)).fetchone()
                 if existing is None:
                     raise RuntimeError('Alert storage failed without a duplicate source identifier.')
                 alert_id = existing['id']
+                if json.loads(existing['raw_alert']) != json.loads(parsed.raw_alert):
+                    raise SourceEventError('source_identity_conflict')
+                if identity:
+                    known = connection.execute('SELECT 1 FROM alert_source_documents WHERE alert_id=?',
+                                               (alert_id,)).fetchone()
+                    different = connection.execute('''SELECT 1 FROM alert_source_documents
+                        WHERE alert_id=? AND (source_namespace IS NULL OR source_namespace<>? OR source_index<>? OR source_document_id<>?)''',
+                        (alert_id,namespace,identity[1],identity[2])).fetchone()
+                    if not known or different:
+                        raise SourceEventError('source_identity_conflict')
+            if identity:
+                connection.execute('''INSERT INTO alert_source_documents
+                    (connection_id,source_index,source_document_id,alert_id,source_namespace) VALUES(?,?,?,?,?)
+                    ON CONFLICT(connection_id,source_index,source_document_id) DO NOTHING''',(*identity,alert_id,namespace))
             record_alert_mappings(connection, alert_id)
             connection.execute("UPDATE alerts SET processing_status='processed' WHERE id=?", (alert_id,))
             return {'alert_id': alert_id, 'created': bool(cursor.rowcount), 'incident_id': None}

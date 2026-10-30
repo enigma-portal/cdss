@@ -526,6 +526,10 @@ def initialize_database():
             migrate_contextual_guidance(connection)
             from app.services.alert_retention import migrate_retention
             migrate_retention(connection)
+            from app.database.auth_security import migrate_auth_security
+            migrate_auth_security(connection)
+            from app.database.ingestion_safety import migrate_ingestion_safety
+            migrate_ingestion_safety(connection)
 
             user_columns = {row["name"] for row in connection.execute("PRAGMA table_info(users)")}
             if "theme" not in user_columns:

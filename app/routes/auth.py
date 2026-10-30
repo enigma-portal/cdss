@@ -19,7 +19,8 @@ from app.time_utils import utc_now_text
 from app.services.connectors import CONNECTOR_TYPES, create_connector
 from app.services.secret_store import protect_secret, unprotect_secret, SecretProtectionError
 from app.services.wazuh_indexer import WazuhIndexerError
-from app.services.siem_collection_status import connector_collection_status
+from app.services.siem_collection_status import connector_collection_status, collection_status_rows
+from app.services.login_throttle import reserve_attempt, clear_account_budget
 
 auth = Blueprint("auth", __name__)
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
@@ -27,28 +28,8 @@ THEMES = {"system", "navy", "high-contrast", "light"}
 
 
 def _validated_siem_endpoint(raw_url, raw_port, resolve=False):
-    parsed = urlsplit(raw_url.strip())
-    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
-        raise ValueError("Use an HTTPS URL without embedded credentials.")
-    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
-        raise ValueError("Enter only the SIEM base URL, without a path or query.")
-    try:
-        port = int(raw_port)
-    except (TypeError, ValueError) as error:
-        raise ValueError("Port must be a number between 1 and 65535.") from error
-    if not 1 <= port <= 65535:
-        raise ValueError("Port must be between 1 and 65535.")
-    if resolve:
-        try:
-            addresses = {item[4][0] for item in socket.getaddrinfo(parsed.hostname, port)}
-        except socket.gaierror as error:
-            raise ValueError("The SIEM hostname could not be resolved.") from error
-        for address in addresses:
-            ip = ipaddress.ip_address(address)
-            if (ip.is_loopback or ip.is_link_local or ip.is_multicast
-                    or ip.is_unspecified or ip.is_reserved):
-                raise ValueError("Loopback, link-local, reserved and multicast SIEM destinations are blocked.")
-    return f"https://{parsed.hostname}", port
+    from app.services.siem_endpoint import validated_siem_endpoint
+    return validated_siem_endpoint(raw_url, raw_port, resolve=resolve)
 
 
 def _audit_connector(connection, connection_id, action, details):
@@ -129,25 +110,19 @@ def login():
             return redirect(url_for("dashboard.index"))
         if request.method == "POST":
             validate_csrf()
-            locked_until = session.get("login_locked_until")
-            now = datetime.now(timezone.utc)
-            if locked_until and now < datetime.fromisoformat(locked_until):
+            username = request.form.get("username", "").strip()[:32]
+            if not reserve_attempt(connection, request.remote_addr, username, int(time.time())):
                 flash("Too many attempts. Wait one minute and try again.", "error")
                 return render_template("login.html"), 429
-            username = request.form.get("username", "").strip()[:32]
             password = request.form.get("password", "")
             user = connection.execute(
                 "SELECT id, password_hash, is_active, auth_version FROM users WHERE username = ?",
                 (username,),
             ).fetchone()
             if not user or not user["is_active"] or not check_password_hash(user["password_hash"], password):
-                attempts = int(session.get("login_attempts", 0)) + 1
-                session["login_attempts"] = attempts
-                if attempts >= 5:
-                    session["login_locked_until"] = (now + timedelta(minutes=1)).isoformat()
-                    session["login_attempts"] = 0
                 flash("Invalid username or password.", "error")
             else:
+                clear_account_budget(connection, request.remote_addr, username)
                 with connection:
                     connection.execute(
                         "UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?", (user["id"],)
@@ -411,10 +386,7 @@ def siem_connections():
                 return redirect(url_for("auth.siem_connections"))
             except (ValueError, sqlite3.IntegrityError, SecretProtectionError) as error:
                 flash("That connection name already exists." if isinstance(error, sqlite3.IntegrityError) else str(error), "error")
-        rows = connection.execute("""SELECT id, name, connector_type, base_url, port, index_pattern,
-                                     username, verify_tls, is_enabled, status, last_success_at,
-                                     last_error, response_time_ms, cluster_health, last_alert_at
-                              FROM siem_connections ORDER BY name""").fetchall()
+        rows = collection_status_rows(connection)
         interval_row = connection.execute("""SELECT setting_value FROM system_settings
             WHERE setting_key='poll_interval_seconds'""").fetchone()
         poll_interval = interval_row['setting_value'] if interval_row else '30'
@@ -520,6 +492,7 @@ def edit_siem_connection(connection_id):
                     with connection:
                         connection.execute("""UPDATE siem_connections SET name = ?, base_url = ?, port = ?,
                             index_pattern = ?, username = ?, verify_tls = ?, status = 'not_tested',
+                            poll_status='not_tested',last_poll_success_at=NULL,last_poll_error=NULL,
                             is_enabled = 0, updated_at = CURRENT_TIMESTAMP, updated_by = ? WHERE id = ?""",
                             (name, base_url, port, index_pattern, username,
                              int(request.form.get("verify_tls") == "1"), g.user["id"], connection_id))

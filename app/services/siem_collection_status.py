@@ -1,7 +1,6 @@
 """One analyst-facing collection status for connector cards and the global banner.
 
-The stored last_success_at is a successful SIEM contact: both a manual connection
-test and a poll can update it. Do not describe it as collection-only telemetry.
+Only persisted poll evidence proves collection; generic SIEM contact does not.
 """
 
 from dataclasses import dataclass
@@ -12,11 +11,12 @@ from app.time_utils import parse_timestamp
 LABELS = {
     'disabled': 'SIEM alert collection disabled',
     'active': 'SIEM alert collection active',
+    'partial': 'SIEM collection partial — source documents need review',
     'failed': 'SIEM unavailable — alert collection interrupted',
     'unknown': 'SIEM alert collection status unknown',
     'stale': 'SIEM alert collection stale',
 }
-PRECEDENCE = ('failed', 'unknown', 'stale', 'active')
+PRECEDENCE = ('failed', 'partial', 'unknown', 'stale', 'active')
 
 
 @dataclass(frozen=True)
@@ -25,6 +25,35 @@ class CollectionStatus:
     label: str
     last_success_at: datetime | None = None
     enabled_count: int = 0
+    pending_rejections: int = 0
+
+
+def collection_status_rows(connection):
+    from app.services.ingestion_safety import source_namespace
+    rows = connection.execute('''SELECT id,name,connector_type,base_url,port,index_pattern,
+        username,verify_tls,is_enabled,status,last_success_at,last_error,response_time_ms,
+        cluster_health,last_alert_at,poll_status,last_poll_success_at,last_poll_error
+        FROM siem_connections ORDER BY name''').fetchall()
+    rejections = connection.execute('''SELECT connection_id,source_namespace,COUNT(*) AS pending
+        FROM rejected_source_events GROUP BY connection_id,source_namespace''').fetchall()
+    result = []
+    for row in rows:
+        try:
+            namespace = source_namespace(row)
+        except ValueError:
+            namespace = None
+        pending = sum(item['pending'] for item in rejections
+                      if item['connection_id']==row['id'] or
+                      (namespace is not None and item['source_namespace']==namespace))
+        result.append(dict(row) | {'pending_rejections':pending})
+    return result
+
+
+def _label(state, pending):
+    label = LABELS[state]
+    if pending and state != 'partial':
+        label += ' — source documents need review'
+    return label
 
 
 def _utc_timestamp(value):
@@ -48,23 +77,27 @@ def connector_collection_status(row, poll_interval_seconds=30, *, now=None,
     it is a UI freshness threshold, not an ingestion or risk rule.
     """
     enabled = bool(row['is_enabled']) and polling_enabled
+    fields = dict(row)
+    poll_status = fields.get('poll_status')
+    pending = fields.get('pending_rejections', 0)
     if not enabled:
         state = 'disabled'
-    elif row['status'] == 'error':
+    elif poll_status == 'error':
         state = 'failed'
-    elif row['status'] != 'connected':
+    elif poll_status not in ('connected','partial'):
         state = 'unknown'
     else:
         current = parse_timestamp(now) if now is not None else datetime.now(timezone.utc)
-        success = _utc_timestamp(row['last_success_at'])
+        success = _utc_timestamp(fields.get('last_poll_success_at'))
         age = (current - success).total_seconds() if success and current else None
         if age is None or age < 0:
             state = 'unknown'
         elif age > max(60, 3 * _interval_seconds(poll_interval_seconds)):
             state = 'stale'
         else:
-            state = 'active'
-    return CollectionStatus(state, LABELS[state], _utc_timestamp(row['last_success_at']), int(enabled))
+            state = 'partial' if pending or poll_status=='partial' else 'active'
+    return CollectionStatus(state, _label(state, pending),
+                            _utc_timestamp(fields.get('last_poll_success_at')), int(enabled), pending)
 
 
 def overall_collection_status(rows, poll_interval_seconds=30, *, now=None,
@@ -79,4 +112,5 @@ def overall_collection_status(rows, poll_interval_seconds=30, *, now=None,
     # A single connector has an unambiguous contact timestamp. With several,
     # avoid presenting one source's success as the health of every source.
     last_success = enabled[0].last_success_at if len(enabled) == 1 else None
-    return CollectionStatus(state, LABELS[state], last_success, len(enabled))
+    pending = sum(item.pending_rejections for item in enabled)
+    return CollectionStatus(state, _label(state, pending), last_success, len(enabled), pending)

@@ -12,6 +12,9 @@ from app.services.incident_processor import ingest_source_alert
 from app.services.secret_store import unprotect_secret
 from app.services.wazuh_indexer import WazuhIndexerError
 from app.single_instance import acquire_poller_lock, AlreadyRunningError
+from app.services.ingestion_safety import (
+    preserve_rejection, SourceEventError, require_connector_snapshot, connector_matches_snapshot,
+)
 
 LOGGER = logging.getLogger(__name__)
 _START_LOCK = Lock()
@@ -77,6 +80,11 @@ def _poll_once(batch_size, minimum_level):
             alerts, next_cursor = connector.fetch_event_page(
                 size=batch_size, search_after=search_after,
             )
+            connection = get_db_connection()
+            try:
+                require_connector_snapshot(connection, row)
+            finally:
+                connection.close()
             accepted_count = 0
             rejected_error = None
             for alert in alerts:
@@ -89,11 +97,14 @@ def _poll_once(batch_size, minimum_level):
                     level = int(rule['level']) if rule.get('level') is not None else 0
                     if level < minimum_level:
                         continue
-                    ingest_source_alert(alert)
+                    ingest_source_alert(alert, connection_id=row['id'], expected_connector=row)
                     accepted_count += 1
                 except (TypeError, ValueError) as error:
                     LOGGER.warning("Malformed SIEM event skipped for connector %s: %s",
                                    row["id"], _safe_poll_error(error))
+                    reason = error.reason_code if isinstance(error, SourceEventError) else 'malformed_event'
+                    if preserve_rejection(alert, row['id'], reason, expected_connector=row):
+                        continue
                     rejected_error = error
                     break
             if rejected_error:
@@ -103,11 +114,19 @@ def _poll_once(batch_size, minimum_level):
             connection = get_db_connection()
             try:
                 with connection:
+                    connection.execute('BEGIN IMMEDIATE')
+                    require_connector_snapshot(connection, row)
                     contacted_at = utc_now_text()
                     connection.execute("""UPDATE siem_connections SET status = 'connected',
+                        poll_status = 'connected', last_poll_success_at = ?, last_poll_error = NULL,
                         last_success_at = ?, last_error = NULL,
                         last_alert_at = CASE WHEN ? > 0 THEN ? ELSE last_alert_at END
-                        WHERE id = ?""", (contacted_at, accepted_count, contacted_at, row["id"]))
+                        WHERE id = ?""", (contacted_at, contacted_at, accepted_count, contacted_at, row["id"]))
+                    pending = connection.execute('SELECT COUNT(*) FROM rejected_source_events WHERE connection_id=?',
+                                                 (row['id'],)).fetchone()[0]
+                    if pending:
+                        connection.execute("UPDATE siem_connections SET status='partial',poll_status='partial',last_error=? WHERE id=?",
+                            (f'{pending} source document(s) preserved for operator review; collection continues.',row['id']))
                     if next_cursor:
                         connection.execute("""
                             INSERT INTO ingestion_cursors
@@ -128,8 +147,11 @@ def _poll_once(batch_size, minimum_level):
             connection = get_db_connection()
             try:
                 with connection:
-                    connection.execute("UPDATE siem_connections SET status = 'error', last_error = ? WHERE id = ?",
-                                       (safe_error, row["id"]))
+                    connection.execute('BEGIN IMMEDIATE')
+                    if not connector_matches_snapshot(connection, row):
+                        continue
+                    connection.execute("UPDATE siem_connections SET status = 'error', last_error = ?, poll_status='error',last_poll_error=? WHERE id = ?",
+                                       (safe_error, safe_error, row["id"]))
             finally:
                 connection.close()
 

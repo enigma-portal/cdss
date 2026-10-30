@@ -81,6 +81,7 @@
 .investigation-scope { color: var(--muted); max-width: 60rem; }
 .triage-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem 1rem; }
 .triage-actions form { margin: .5rem 0; }
+.overview-head > a, .metadata > a, .triage-actions > a:not(.primary-action) { color: var(--orange); }
 .triage-family > h3 { font-size: 1.15rem; border: 0; padding: 0; }
 .quick-views { display: flex; flex-wrap: wrap; gap: .5rem 1rem; margin: 1rem 0; }
 .quick-views a { color: var(--muted); text-decoration: none; }

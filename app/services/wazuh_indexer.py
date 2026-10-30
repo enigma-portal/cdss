@@ -6,13 +6,27 @@ import math
 import os
 import re
 import ssl
+import socket
+import http.client
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
-from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener
+from urllib.parse import urlsplit
+from app.services.siem_endpoint import parse_origin, validate_destination
 
 
 class WazuhIndexerError(RuntimeError):
     """Raised when the Wazuh Indexer API cannot be used safely."""
+
+
+class IndexerDocument(dict):
+    """Source contents plus transport provenance outside the immutable payload."""
+
+    def __init__(self, hit):
+        self.raw_source = hit['_source']
+        super().__init__(self.raw_source if isinstance(self.raw_source, dict) else {})
+        self.source_index = hit.get('_index')
+        self.source_document_id = hit.get('_id')
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -22,8 +36,48 @@ class _NoRedirect(HTTPRedirectHandler):
         return None
 
 
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, host, addresses, **kwargs):
+        super().__init__(host, **kwargs)
+        self._addresses = addresses
+        self._create_connection = self._connect_validated
+
+    def _connect_validated(self, address, timeout, source_address=None):
+        error = None
+        for family, kind, protocol, _, endpoint in self._addresses:
+            sock = None
+            try:
+                sock = socket.socket(family, kind, protocol)
+                sock.settimeout(timeout)
+                if source_address:
+                    sock.bind(source_address)
+                sock.connect(endpoint)
+                return sock
+            except OSError as failure:
+                error = failure
+                if sock is not None:
+                    sock.close()
+        raise error or OSError('No validated SIEM address is available.')
+
+
+class _PinnedHTTPSHandler(HTTPSHandler):
+    def __init__(self, addresses, context):
+        super().__init__(context=context)
+        self._addresses = addresses
+
+    def https_open(self, request):
+        def connection(host, **kwargs):
+            return _PinnedHTTPSConnection(host, self._addresses, context=self._context, **kwargs)
+        return self.do_open(connection, request)
+
+
 def _open_no_redirect(request, context, timeout):
-    return build_opener(_NoRedirect(), HTTPSHandler(context=context)).open(
+    target = urlsplit(request.full_url)
+    origin = parse_origin(f'{target.scheme}://{target.netloc}')
+    addresses = validate_destination(origin.hostname, origin.port or 443)
+    # Explicitly disable environment proxies. Connect to the validated numeric
+    # addresses while HTTPSConnection retains the original TLS/Host hostname.
+    return build_opener(ProxyHandler({}), _NoRedirect(), _PinnedHTTPSHandler(addresses, context)).open(
         request, timeout=timeout,
     )
 
@@ -35,8 +89,7 @@ class WazuhIndexerClient:
         self, base_url, username, password, index_name="wazuh-alerts-*",
         verify_tls=True, timeout_seconds=10,
     ):
-        if not base_url.startswith(("https://", "http://")):
-            raise ValueError("WAZUH_INDEXER_URL must begin with https:// or http://.")
+        parse_origin(base_url)
         if not username or not password:
             raise ValueError("Wazuh Indexer username and password are required.")
         self.base_url = base_url.rstrip("/")
@@ -131,14 +184,19 @@ class WazuhIndexerClient:
         return alerts
 
     @staticmethod
-    def _validated_hits(response):
+    def _validated_hits(response, *, preserve_invalid_sources=False):
         """Reject structurally malformed JSON instead of treating it as no alerts."""
         if not isinstance(response, dict) or not isinstance(response.get("hits"), dict):
             raise WazuhIndexerError("SIEM returned malformed JSON: hits object is unavailable.")
+        shards = response.get('_shards')
+        if (response.get('timed_out', False) is not False or
+                (shards is not None and (not isinstance(shards, dict) or
+                 type(shards.get('failed')) is not int or shards['failed'] != 0))):
+            raise WazuhIndexerError('SIEM returned a partial or timed-out search; ingestion cursor retained.')
         hits = response["hits"].get("hits")
         if not isinstance(hits, list) or not all(isinstance(hit, dict) for hit in hits):
             raise WazuhIndexerError("SIEM returned malformed JSON: alert hits must be a list.")
-        if any(not isinstance(hit.get('_source'), dict) for hit in hits):
+        if not preserve_invalid_sources and any(not isinstance(hit.get('_source'), dict) for hit in hits):
             raise WazuhIndexerError("SIEM returned malformed JSON: alert source must be an object.")
         return hits
 
@@ -167,7 +225,7 @@ class WazuhIndexerClient:
             payload["search_after"] = list(search_after)
         safe_index = quote(self.index_name, safe="*,-")
         response = self._request_json("POST", f"/{safe_index}/_search", payload)
-        hits = self._validated_hits(response)
+        hits = self._validated_hits(response, preserve_invalid_sources=True)
         # Validate the complete page before returning anything that can advance
         # the persisted cursor; never silently skip a malformed source document.
         for hit in hits:
@@ -177,11 +235,13 @@ class WazuhIndexerClient:
                     or (type(sort[0]) is float and not math.isfinite(sort[0]))
                     or not isinstance(sort[1], str) or not sort[1]):
                 raise WazuhIndexerError("SIEM returned an invalid ingestion cursor.")
+            if any(not isinstance(hit.get(key), str) or not hit[key] for key in ('_index','_id')):
+                raise WazuhIndexerError('SIEM returned incomplete source-document identity.')
         alerts = []
         ordered_hits = list(reversed(hits)) if bootstrap_latest else hits
         for hit in ordered_hits:
             source = hit.get("_source")
-            alert = dict(source)
+            alert = IndexerDocument(hit)
             alert.setdefault("id", hit.get("_id"))
             alerts.append(alert)
         cursor_hit = hits[0] if bootstrap_latest and hits else hits[-1] if hits else None

@@ -24,6 +24,8 @@
     </div>
     <dl>
       <dt>Collection setting</dt><dd>{{ 'Enabled' if item.is_enabled else 'Disabled' }}</dd>
+      <dt>Last successful collection cycle</dt><dd>{{ item.last_poll_success_at|db_time('No proven successful poll') }}</dd>
+      {% if item.last_poll_error %}<dt>Collection error</dt><dd>{{ item.last_poll_error }}</dd>{% endif %}
       <dt>Last measured response</dt><dd>{{ item.response_time_ms ~ ' ms' if item.response_time_ms is not none else 'Not measured' }}</dd>
       <dt>Last reported cluster health</dt><dd>{{ item.cluster_health or 'Unknown' }}</dd>
       <dt>Last successful SIEM contact</dt><dd>{{ item.last_success_at|db_time('Never') }}</dd>

@@ -149,7 +149,7 @@ class PhaseNineEndToEndTests(unittest.TestCase):
              'data':{'srcip':'192.0.2.30','srcuser':user}}
         if group=='syscheck':
             raw['syscheck']={'path':'/etc/ssh/sshd_config','event':'modified'}
-        self.documents.append({'_id':'doc-'+name,'_source':raw,'sort':[int(timestamp.timestamp()*1000),'doc-'+name]})
+        self.documents.append({'_index':'wazuh-alerts-offline-fixture','_id':'doc-'+name,'_source':raw,'sort':[int(timestamp.timestamp()*1000),'doc-'+name]})
         return raw
 
     def investigate_group(self):
