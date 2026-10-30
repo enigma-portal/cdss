@@ -382,3 +382,10 @@ Unknown historical source origin cannot be reconstructed safely; replay can requ
 ### Remediation Git receipt
 
 The verified implementation SHA and push verification are recorded in the following receipt after committing. A report-only receipt commit necessarily has its own SHA; the exact final branch tip is provided in the task handoff and can be resolved from `refs/heads/e2e-hardening-2026-10-28`. PR #1 remains **NOT MERGED**.
+
+- Final verified implementation SHA: **`fcd983d003f8a171c5bf29122a4a8ef944eb1fef`**.
+- Commit: **Separate collection proof and preserve stable SIEM source identity**; 14 files, 591 additions and 46 deletions, including this remediation report and 17 new regression tests.
+- Final-source verification: **450/450 passed**; the only subsequent change is this documentation receipt. No application or test edits followed the passing run.
+- Staged-file inspection: 14 intended files, no forbidden runtime/database/secret paths and no detected private-key/token patterns. The disposable QA server was stopped and its generated credential file removed.
+- Pre-push remote verification: hardening was still `8a9a259ab0d5f34f49097748f33f0da46b7a6d30`; main remained `5623b51aff3e5873a11e53e9bce38f61e5c2044f`. GitHub reported PR #1 open, draft and `merged=false`.
+- Publication: normal push of the implementation and this report-only receipt to the existing hardening branch; final remote-head equality and PR status are checked after push and recorded in the task handoff. The exact final branch SHA includes the receipt commit and is obtained from Git rather than claiming a self-referential report hash.
